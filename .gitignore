@@ -1,0 +1,5 @@
+/target/
+/windows-rs/
+
+**/*.pdb
+**/*.exe

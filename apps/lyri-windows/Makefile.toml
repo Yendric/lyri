@@ -1,0 +1,51 @@
+[env]
+APP_EXE = "lyri-app.exe"
+TARGET_DIR = "..\\..\\target"
+PAYLOAD_DIR = "..\\..\\target\\msix-payload"
+
+[tasks.build-release]
+private = true
+command = "cargo"
+args = ["build", "--release"]
+
+[tasks.update-assets]
+command = "winapp"
+args = [
+  "manifest",
+  "update-assets",
+  "..\\..\\icons\\logo.svg",
+  "--light-image",
+  "..\\..\\icons\\logo.svg",
+  "--manifest",
+  ".\\Package.appxmanifest",
+]
+
+[tasks.stage-msix-payload]
+private = true
+script_runner = "powershell"
+script_runner_args = ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File"]
+script_extension = "ps1"
+script = '''
+$ErrorActionPreference = "Stop"
+
+Remove-Item $env:PAYLOAD_DIR -Recurse -Force -ErrorAction SilentlyContinue
+New-Item $env:PAYLOAD_DIR -ItemType Directory | Out-Null
+
+Copy-Item `
+    "$env:TARGET_DIR\release\$env:APP_EXE", `
+    "$env:TARGET_DIR\release\Microsoft.WindowsAppRuntime.Bootstrap.dll", `
+    "Package.appxmanifest" `
+    $env:PAYLOAD_DIR
+Copy-Item Assets $env:PAYLOAD_DIR -Recurse
+'''
+
+[tasks.msix]
+dependencies = ["update-assets", "build-release", "stage-msix-payload"]
+command = "winapp"
+args = ["pack", "${PAYLOAD_DIR}", "--executable", "${APP_EXE}", "--output", "..\\..\\target\\lyri-app.msix"]
+
+# Signed with a dev certificate
+[tasks.msix-dev]
+dependencies = ["update-assets", "build-release", "stage-msix-payload"]
+command = "winapp"
+args = ["pack", "${PAYLOAD_DIR}", "--executable", "${APP_EXE}", "--cert", "devcert.pfx", "--output", "..\\..\\target\\lyri-app-dev.msix"]

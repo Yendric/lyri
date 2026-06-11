@@ -1,0 +1,24 @@
+[package]
+name = "lyri-windows"
+version = "0.1.0"
+edition = "2024"
+
+[[bin]]
+name = "lyri-app"
+path = "src/main.rs"
+
+[dependencies]
+lyri-core = { path = "../../crates/lyri-core" }
+lyri-providers = { path = "../../crates/lyri-providers" }
+tokio = { version = "1", features = ["rt-multi-thread"] }
+windows = { version = "0.62.2", features = [
+    "Foundation",
+    "Media",
+    "Media_Control",
+    "Win32_System_WinRT",
+] }
+windows-reactor = { path = "../../windows-rs/crates/libs/reactor" }
+
+[target.'cfg(windows)'.build-dependencies]
+windows-reactor-setup = { path = "../../windows-rs/crates/libs/reactor-setup" }
+winresource = "0.1"

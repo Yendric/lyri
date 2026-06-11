@@ -1,0 +1,8 @@
+[workspace]
+members = [
+    "apps/lyri-windows",
+    "crates/lyri-core",
+    "crates/lyri-providers",
+]
+exclude = ["windows-rs"]
+resolver = "3"
