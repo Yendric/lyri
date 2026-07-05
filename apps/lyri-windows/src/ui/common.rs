@@ -1,5 +1,3 @@
-use std::time::Duration;
-
 use windows_reactor::*;
 
 pub(super) fn empty_state(message: &str) -> Element {
@@ -8,14 +6,7 @@ pub(super) fn empty_state(message: &str) -> Element {
 
 pub(super) fn centered_stack(children: impl Into<Element>) -> Element {
     border(children)
-        .horizontal_alignment(HorizontalAlignment::Stretch)
-        .vertical_alignment(VerticalAlignment::Stretch)
+        .horizontal_alignment(HorizontalAlignment::Center)
+        .vertical_alignment(VerticalAlignment::Center)
         .into()
-}
-
-pub(super) fn format_duration(duration: Duration) -> String {
-    let total = duration.as_secs();
-    let minutes = total / 60;
-    let seconds = total % 60;
-    format!("{minutes}:{seconds:02}")
 }

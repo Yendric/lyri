@@ -4,8 +4,8 @@ use std::time::Duration;
 use tokio::runtime::{Builder, Runtime};
 use windows_reactor::*;
 
-use lyri_core::lyrics::LyricsResult;
 use lyri_providers::LyricsProviderChain;
+use lyri_providers::worker::{LyricsStatus, fetch_lyrics};
 
 mod body;
 mod common;
@@ -17,7 +17,6 @@ use body::render_body;
 use header::render_header;
 use settings::{DEFAULT_LRCLIB_URL, SettingsState, render_settings_pane};
 
-use crate::lyrics_worker::{ActiveLyrics, LyricsStatus, fetch_lyrics, lyrics_query};
 use crate::now_playing::{
     NowPlaying, NowPlayingController, NowPlayingEvent, spawn_now_playing_events,
 };
@@ -51,8 +50,6 @@ pub fn app(cx: &mut RenderCx) -> Element {
     });
 
     let lyrics_playback = playback.clone();
-    let lyrics_runtime = lyrics_runtime.clone();
-    let lyrics_providers = lyrics_providers.clone();
     cx.use_effect_with_cleanup(
         playback.as_ref().map(|value| value.key.clone()),
         move || {
@@ -62,13 +59,12 @@ pub fn app(cx: &mut RenderCx) -> Element {
             };
 
             let key = playback.key.clone();
-            let query = lyrics_query(&playback);
+            let query = playback.lyrics_query();
             set_lyrics.call(LyricsStatus::Loading(key.clone()));
 
-            let providers = lyrics_providers.clone();
             let setter = set_lyrics.clone();
             let task = lyrics_runtime.spawn(async move {
-                setter.call(fetch_lyrics(providers, key, query).await);
+                setter.call(fetch_lyrics(lyrics_providers, key, query).await);
             });
 
             Some(move || task.abort())
@@ -109,20 +105,6 @@ fn lyrics_runtime() -> Arc<Runtime> {
             .build()
             .expect("valid lyrics lookup runtime"),
     )
-}
-
-fn status_for(lyrics: ActiveLyrics<'_>) -> String {
-    match lyrics {
-        ActiveLyrics::Idle => "Listening for media...".to_string(),
-        ActiveLyrics::Loading => "Finding lyrics...".to_string(),
-        ActiveLyrics::Ready(
-            LyricsResult::Synced { source, .. }
-            | LyricsResult::Plain { source, .. }
-            | LyricsResult::Instrumental { source },
-        ) => format!("Lyrics from {source}"),
-        ActiveLyrics::Missing => "No lyrics found.".to_string(),
-        ActiveLyrics::Error(_) => "Lyrics lookup failed.".to_string(),
-    }
 }
 
 fn render_app(
@@ -203,7 +185,7 @@ fn render_app(
     let active_lyrics = lyrics.active(playback.map(|playback| &playback.key));
     let status = playback_error
         .map(str::to_string)
-        .unwrap_or_else(|| status_for(active_lyrics));
+        .unwrap_or_else(|| active_lyrics.status_message());
     let header = render_header(playback, &status);
     let body = render_body(playback, active_lyrics, &status, playback_controls, cx);
     let content_padding = responsive_content_padding(inner_size.width);

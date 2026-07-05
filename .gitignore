@@ -3,3 +3,10 @@
 
 **/*.pdb
 **/*.exe
+
+node_modules/
+apps/lyri-web/dist/
+/.pnpm-store/
+
+# Affinity Designer lock files
+*~lock~

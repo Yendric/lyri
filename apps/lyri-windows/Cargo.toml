@@ -1,16 +1,16 @@
 [package]
 name = "lyri-windows"
-version = "0.1.0"
-edition = "2024"
+version.workspace = true
+edition.workspace = true
 
 [[bin]]
 name = "lyri-app"
 path = "src/main.rs"
 
 [dependencies]
-lyri-core = { path = "../../crates/lyri-core" }
-lyri-providers = { path = "../../crates/lyri-providers" }
-tokio = { version = "1", features = ["rt-multi-thread"] }
+lyri-core.workspace = true
+lyri-providers.workspace = true
+tokio.workspace = true
 windows = { version = "0.62.2", features = [
     "Foundation",
     "Media",

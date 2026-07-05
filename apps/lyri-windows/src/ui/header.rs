@@ -1,7 +1,7 @@
 use windows_reactor::*;
 
-use super::common::format_duration;
 use crate::now_playing::NowPlaying;
+use lyri_core::lyrics::{artist_album_label, format_duration};
 
 pub(super) fn render_header(playback: Option<&NowPlaying>, status: &str) -> Element {
     let title_text = playback
@@ -10,12 +10,9 @@ pub(super) fn render_header(playback: Option<&NowPlaying>, status: &str) -> Elem
         .unwrap_or("Lyri");
 
     let subtitle_text = playback
-        .map(format_artist_album)
-        .filter(|text| !text.trim().is_empty())
+        .map(|playback| artist_album_label(&playback.artist, &playback.album))
         .unwrap_or_else(|| status.to_string());
-    let time_text = playback
-        .map(format_playback_time)
-        .unwrap_or_else(|| status.to_string());
+    let time_text = playback.map(format_playback_time).unwrap_or_default();
 
     vstack((
         text_block(title_text)
@@ -38,18 +35,6 @@ pub(super) fn render_header(playback: Option<&NowPlaying>, status: &str) -> Elem
     .spacing(4.0)
     .horizontal_alignment(HorizontalAlignment::Stretch)
     .into()
-}
-
-fn format_artist_album(playback: &NowPlaying) -> String {
-    let artist = playback.artist.trim();
-    let album = playback.album.trim();
-
-    match (artist.is_empty(), album.is_empty()) {
-        (false, false) => format!("{artist} - {album}"),
-        (false, true) => artist.to_string(),
-        (true, false) => album.to_string(),
-        (true, true) => "Unknown artist".to_string(),
-    }
 }
 
 fn format_playback_time(playback: &NowPlaying) -> String {

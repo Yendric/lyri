@@ -1,12 +1,14 @@
+//! Shared lyrics-fetch state machine used by the platform apps.
+
 use std::sync::Arc;
 
-use lyri_core::lyrics::{LyricsQuery, LyricsResult};
-use lyri_providers::LyricsProviderChain;
+use lyri_core::lyrics::{LyricsQuery, LyricsResult, TrackKey};
 
-use crate::now_playing::{NowPlaying, TrackKey};
+use crate::LyricsProviderChain;
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub enum LyricsStatus {
+    #[default]
     Idle,
     Loading(TrackKey),
     Ready(TrackKey, LyricsResult),
@@ -14,13 +16,17 @@ pub enum LyricsStatus {
     Error(TrackKey, String),
 }
 
-impl Default for LyricsStatus {
-    fn default() -> Self {
-        Self::Idle
-    }
-}
-
 impl LyricsStatus {
+    pub fn key(&self) -> Option<&TrackKey> {
+        match self {
+            Self::Idle => None,
+            Self::Loading(key)
+            | Self::Ready(key, _)
+            | Self::Missing(key)
+            | Self::Error(key, _) => Some(key),
+        }
+    }
+
     pub fn active(&self, key: Option<&TrackKey>) -> ActiveLyrics<'_> {
         match (key, self) {
             (Some(current), Self::Loading(key)) if key == current => ActiveLyrics::Loading,
@@ -45,12 +51,19 @@ pub enum ActiveLyrics<'a> {
     Error(&'a str),
 }
 
-pub fn lyrics_query(playback: &NowPlaying) -> LyricsQuery {
-    LyricsQuery {
-        title: playback.title.clone(),
-        artist: playback.artist.clone(),
-        album: playback.album.clone(),
-        duration: playback.duration,
+impl ActiveLyrics<'_> {
+    pub fn status_message(&self) -> String {
+        match self {
+            Self::Idle => "Listening for media...".to_string(),
+            Self::Loading => "Finding lyrics...".to_string(),
+            Self::Ready(
+                LyricsResult::Synced { source, .. }
+                | LyricsResult::Plain { source, .. }
+                | LyricsResult::Instrumental { source },
+            ) => format!("Lyrics from {source}"),
+            Self::Missing => "No lyrics found.".to_string(),
+            Self::Error(_) => "Lyrics lookup failed.".to_string(),
+        }
     }
 }
 

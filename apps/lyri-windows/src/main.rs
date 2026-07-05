@@ -1,6 +1,5 @@
 #![windows_subsystem = "windows"]
 
-mod lyrics_worker;
 mod now_playing;
 mod ui;
 

@@ -3,9 +3,9 @@ use windows_reactor::*;
 use super::common::{centered_stack, empty_state};
 use super::responsive_content_padding;
 use super::synced_lyrics::{LyricsSeekTarget, SyncedLyricsProps, synced_lyrics};
-use crate::lyrics_worker::ActiveLyrics;
 use crate::now_playing::{NowPlaying, NowPlayingController};
 use lyri_core::lyrics::LyricsResult;
+use lyri_providers::worker::ActiveLyrics;
 
 pub(super) fn render_body(
     playback: Option<&NowPlaying>,
@@ -16,8 +16,7 @@ pub(super) fn render_body(
 ) -> Element {
     let inner_size = cx.use_inner_size();
     let content_padding = responsive_content_padding(inner_size.width);
-    let header_reserve = responsive_header_reserve(inner_size.height);
-    let viewport_height = (inner_size.height - header_reserve).max(220.0);
+    let viewport_height = (inner_size.height - HEADER_RESERVE).max(220.0);
     let viewport_width = (inner_size.width - content_padding * 2.0).max(220.0);
 
     match (playback, lyrics) {
@@ -80,13 +79,10 @@ fn render_plain(text: &str, viewport_height: f64) -> Element {
     .into()
 }
 
-fn responsive_header_reserve(height: f64) -> f64 {
-    let _ = height;
+const CONTENT_TOP_PADDING: f64 = 12.0;
+const HEADER_ROW_SPACING: f64 = 28.0;
+const HEADER_TEXT_HEIGHT: f64 = 52.0;
+const VIEWPORT_OVERFILL: f64 = 24.0;
 
-    const CONTENT_TOP_PADDING: f64 = 12.0;
-    const HEADER_ROW_SPACING: f64 = 28.0;
-    const HEADER_TEXT_HEIGHT: f64 = 52.0;
-    const VIEWPORT_OVERFILL: f64 = 24.0;
-
-    CONTENT_TOP_PADDING + HEADER_ROW_SPACING + HEADER_TEXT_HEIGHT - VIEWPORT_OVERFILL
-}
+const HEADER_RESERVE: f64 =
+    CONTENT_TOP_PADDING + HEADER_ROW_SPACING + HEADER_TEXT_HEIGHT - VIEWPORT_OVERFILL;

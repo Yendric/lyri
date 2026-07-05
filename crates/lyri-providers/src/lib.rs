@@ -2,6 +2,7 @@ use anyhow::Result;
 use lyri_core::lyrics::{LyricsProvider, LyricsQuery, LyricsResult};
 
 pub mod lrclib;
+pub mod worker;
 
 pub struct LyricsProviderChain {
     providers: Vec<Box<dyn LyricsProvider>>,
@@ -18,7 +19,6 @@ impl LyricsProviderChain {
 
     pub async fn fetch(&self, query: &LyricsQuery) -> Result<Option<LyricsResult>> {
         for provider in &self.providers {
-            let _provider_name = provider.name();
             if let Some(result) = provider.fetch(query).await? {
                 return Ok(Some(result));
             }

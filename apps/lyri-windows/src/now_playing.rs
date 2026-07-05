@@ -11,20 +11,7 @@ use windows::Media::Control::{
 use windows::Win32::System::WinRT::{RO_INIT_MULTITHREADED, RoInitialize};
 use windows::core::Result;
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct TrackKey {
-    title: String,
-    artist: String,
-}
-
-impl TrackKey {
-    fn new(title: &str, artist: &str) -> Self {
-        Self {
-            title: title.trim().to_string(),
-            artist: artist.trim().to_string(),
-        }
-    }
-}
+use lyri_core::lyrics::{LyricsQuery, TrackKey};
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct NowPlaying {
@@ -36,19 +23,29 @@ pub struct NowPlaying {
     pub position: Duration,
     pub is_playing: bool,
     pub can_seek: bool,
+    playback_rate: f64,
     observed_at: Instant,
 }
 
 impl NowPlaying {
     pub fn current_position(&self) -> Duration {
         let position = if self.is_playing {
-            self.position + self.observed_at.elapsed()
+            self.position + self.observed_at.elapsed().mul_f64(self.playback_rate)
         } else {
             self.position
         };
 
         self.duration
             .map_or(position, |duration| position.min(duration))
+    }
+
+    pub fn lyrics_query(&self) -> LyricsQuery {
+        LyricsQuery {
+            title: self.title.clone(),
+            artist: self.artist.clone(),
+            album: self.album.clone(),
+            duration: self.duration,
+        }
     }
 }
 
@@ -201,31 +198,44 @@ struct ManagerEvents {
     _sessions_handler: ManagerHandler<SessionsChangedEventArgs>,
 }
 
+/// Builds a handler that forwards `command` to the watcher and registers it
+/// through `register`, reporting registration failures via `emit`.
+fn watch_event<TSource, TArgs>(
+    tx: &mpsc::Sender<WatchCommand>,
+    command: WatchCommand,
+    emit: &dyn Fn(NowPlayingEvent),
+    register: impl FnOnce(&TypedEventHandler<TSource, TArgs>) -> Result<i64>,
+) -> (Option<i64>, TypedEventHandler<TSource, TArgs>)
+where
+    TSource: windows::core::RuntimeType,
+    TArgs: windows::core::RuntimeType,
+{
+    let tx = tx.clone();
+    let handler = TypedEventHandler::new(move |_, _| {
+        let _ = tx.send(command.clone());
+        Ok(())
+    });
+    let token = register(&handler)
+        .map_err(|error| emit(NowPlayingEvent::Error(error.to_string())))
+        .ok();
+
+    (token, handler)
+}
+
 impl ManagerEvents {
     fn new(
         manager: &GlobalSystemMediaTransportControlsSessionManager,
         tx: &mpsc::Sender<WatchCommand>,
         emit: &dyn Fn(NowPlayingEvent),
     ) -> Self {
-        let current_tx = tx.clone();
-        let current_handler = ManagerHandler::<CurrentSessionChangedEventArgs>::new(move |_, _| {
-            let _ = current_tx.send(WatchCommand::Rebind);
-            Ok(())
-        });
-        let current_token = manager
-            .CurrentSessionChanged(&current_handler)
-            .map_err(|error| emit(NowPlayingEvent::Error(error.to_string())))
-            .ok();
-
-        let sessions_tx = tx.clone();
-        let sessions_handler = ManagerHandler::<SessionsChangedEventArgs>::new(move |_, _| {
-            let _ = sessions_tx.send(WatchCommand::Rebind);
-            Ok(())
-        });
-        let sessions_token = manager
-            .SessionsChanged(&sessions_handler)
-            .map_err(|error| emit(NowPlayingEvent::Error(error.to_string())))
-            .ok();
+        let (current_token, current_handler) =
+            watch_event(tx, WatchCommand::Rebind, emit, |handler| {
+                manager.CurrentSessionChanged(handler)
+            });
+        let (sessions_token, sessions_handler) =
+            watch_event(tx, WatchCommand::Rebind, emit, |handler| {
+                manager.SessionsChanged(handler)
+            });
 
         Self {
             manager: manager.clone(),
@@ -264,36 +274,18 @@ impl SessionRegistration {
         tx: &mpsc::Sender<WatchCommand>,
         emit: &dyn Fn(NowPlayingEvent),
     ) -> Self {
-        let timeline_tx = tx.clone();
-        let timeline_handler =
-            SessionHandler::<TimelinePropertiesChangedEventArgs>::new(move |_, _| {
-                let _ = timeline_tx.send(WatchCommand::Refresh);
-                Ok(())
+        let (timeline_token, timeline_handler) =
+            watch_event(tx, WatchCommand::Refresh, emit, |handler| {
+                session.TimelinePropertiesChanged(handler)
             });
-        let timeline_token = session
-            .TimelinePropertiesChanged(&timeline_handler)
-            .map_err(|error| emit(NowPlayingEvent::Error(error.to_string())))
-            .ok();
-
-        let playback_tx = tx.clone();
-        let playback_handler = SessionHandler::<PlaybackInfoChangedEventArgs>::new(move |_, _| {
-            let _ = playback_tx.send(WatchCommand::Refresh);
-            Ok(())
-        });
-        let playback_token = session
-            .PlaybackInfoChanged(&playback_handler)
-            .map_err(|error| emit(NowPlayingEvent::Error(error.to_string())))
-            .ok();
-
-        let media_tx = tx.clone();
-        let media_handler = SessionHandler::<MediaPropertiesChangedEventArgs>::new(move |_, _| {
-            let _ = media_tx.send(WatchCommand::Refresh);
-            Ok(())
-        });
-        let media_token = session
-            .MediaPropertiesChanged(&media_handler)
-            .map_err(|error| emit(NowPlayingEvent::Error(error.to_string())))
-            .ok();
+        let (playback_token, playback_handler) =
+            watch_event(tx, WatchCommand::Refresh, emit, |handler| {
+                session.PlaybackInfoChanged(handler)
+            });
+        let (media_token, media_handler) =
+            watch_event(tx, WatchCommand::Refresh, emit, |handler| {
+                session.MediaPropertiesChanged(handler)
+            });
 
         Self {
             session,
@@ -338,6 +330,7 @@ fn snapshot_session(
         .PlaybackRate()
         .ok()
         .and_then(|rate| rate.Value().ok())
+        .filter(|rate| rate.is_finite() && *rate > 0.0)
         .unwrap_or(1.0);
     let timeline = session.GetTimelineProperties()?;
     let duration =
@@ -365,6 +358,7 @@ fn snapshot_session(
             .Controls()
             .and_then(|controls| controls.IsPlaybackPositionEnabled())
             .unwrap_or(false),
+        playback_rate,
         observed_at: Instant::now(),
     }))
 }
@@ -403,7 +397,9 @@ fn adjusted_position(
 ) -> Duration {
     let mut position = timespan_to_duration(position_ticks);
 
-    if is_playing && playback_rate.is_finite() && playback_rate > 0.0 {
+    // A zero LastUpdatedTime means the session never reported timeline data;
+    // extrapolating from it would add the entire FILETIME epoch (~425 years).
+    if is_playing && last_updated_ticks > 0 {
         let elapsed_ticks = current_filetime_ticks().saturating_sub(last_updated_ticks);
         if elapsed_ticks > 0 {
             position += timespan_to_duration(elapsed_ticks).mul_f64(playback_rate);

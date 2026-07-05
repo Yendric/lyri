@@ -4,6 +4,23 @@ use std::time::Duration;
 
 use anyhow::Result;
 
+/// Identifies a track for matching lyrics results to the current playback,
+/// independent of the platform media session that reported it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TrackKey {
+    title: String,
+    artist: String,
+}
+
+impl TrackKey {
+    pub fn new(title: &str, artist: &str) -> Self {
+        Self {
+            title: title.trim().to_string(),
+            artist: artist.trim().to_string(),
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct LyricsQuery {
     pub title: String,
@@ -41,26 +58,24 @@ pub trait LyricsProvider: Send + Sync {
     fn fetch<'a>(&'a self, query: &'a LyricsQuery) -> LyricsFetchFuture<'a>;
 }
 
+/// Index of the line currently being sung; `None` before the first line starts.
 pub fn active_line_index(lines: &[TimedLine], position: Duration) -> Option<usize> {
-    if lines.is_empty() {
-        return None;
-    }
+    lines
+        .partition_point(|line| line.timestamp <= position)
+        .checked_sub(1)
+}
 
-    let mut low = 0;
-    let mut high = lines.len();
+pub fn format_duration(duration: Duration) -> String {
+    let total = duration.as_secs();
+    format!("{}:{:02}", total / 60, total % 60)
+}
 
-    while low < high {
-        let mid = (low + high) / 2;
-        if lines[mid].timestamp <= position {
-            low = mid + 1;
-        } else {
-            high = mid;
-        }
-    }
-
-    match low {
-        0 => Some(0),
-        index => Some(index - 1),
+pub fn artist_album_label(artist: &str, album: &str) -> String {
+    match (artist.trim(), album.trim()) {
+        ("", "") => "Unknown artist".to_string(),
+        (artist, "") => artist.to_string(),
+        ("", album) => album.to_string(),
+        (artist, album) => format!("{artist} - {album}"),
     }
 }
 
@@ -79,7 +94,7 @@ mod tests {
     fn active_line_tracks_position() {
         let lines = vec![line(1000), line(2000), line(4000)];
 
-        assert_eq!(active_line_index(&lines, Duration::from_millis(0)), Some(0));
+        assert_eq!(active_line_index(&lines, Duration::from_millis(0)), None);
         assert_eq!(
             active_line_index(&lines, Duration::from_millis(1000)),
             Some(0)

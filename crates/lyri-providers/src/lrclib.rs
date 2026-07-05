@@ -31,18 +31,15 @@ impl LrclibProvider {
             return Ok(None);
         };
 
-        let url = format!(
-            "{}/api/get?track_name={}&artist_name={}&album_name={}&duration={}",
-            self.base_url,
-            encode(&query.title),
-            encode(&query.artist),
-            encode(&query.album),
-            duration.as_secs()
-        );
-
         let response = self
             .client
-            .get(url)
+            .get(format!("{}/api/get", self.base_url))
+            .query(&[
+                ("track_name", query.title.as_str()),
+                ("artist_name", query.artist.as_str()),
+                ("album_name", query.album.as_str()),
+            ])
+            .query(&[("duration", duration.as_secs())])
             .send()
             .await
             .context("LRCLIB exact lookup")?;
@@ -59,16 +56,13 @@ impl LrclibProvider {
     }
 
     async fn search(&self, query: &LyricsQuery) -> Result<Option<LrclibLyrics>> {
-        let url = format!(
-            "{}/api/search?track_name={}&artist_name={}",
-            self.base_url,
-            encode(&query.title),
-            encode(&query.artist)
-        );
-
         let response = self
             .client
-            .get(url)
+            .get(format!("{}/api/search", self.base_url))
+            .query(&[
+                ("track_name", query.title.as_str()),
+                ("artist_name", query.artist.as_str()),
+            ])
             .send()
             .await
             .context("LRCLIB search lookup")?
@@ -91,12 +85,13 @@ impl LyricsProvider for LrclibProvider {
 
     fn fetch<'a>(&'a self, query: &'a LyricsQuery) -> lyri_core::lyrics::LyricsFetchFuture<'a> {
         Box::pin(async move {
-            let lyrics = match self.get_exact(query).await? {
-                Some(lyrics) => Some(lyrics),
-                None => self.search(query).await?,
-            };
+            // Map before falling back: an exact match whose record carries no
+            // usable lyrics should still be retried through search.
+            if let Some(result) = self.get_exact(query).await?.and_then(map_response) {
+                return Ok(Some(result));
+            }
 
-            Ok(lyrics.and_then(map_response))
+            Ok(self.search(query).await?.and_then(map_response))
         })
     }
 }
@@ -121,13 +116,7 @@ fn map_response(response: LrclibLyrics) -> Option<LyricsResult> {
     }
 
     if let Some(synced) = response.synced_lyrics.as_deref() {
-        let lines = parse_synced_lrc(synced)
-            .into_iter()
-            .map(|mut line| {
-                line.text = line.text.trim().to_string();
-                line
-            })
-            .collect::<Vec<_>>();
+        let lines = parse_synced_lrc(synced);
         if !lines.is_empty() {
             return Some(LyricsResult::Synced {
                 lines,
@@ -177,10 +166,6 @@ fn score_candidate(query: &LyricsQuery, candidate: &LrclibLyrics) -> u64 {
 
 fn normalized(value: &str) -> String {
     value.trim().to_lowercase()
-}
-
-fn encode(value: &str) -> String {
-    urlencoding::encode(value).into_owned()
 }
 
 #[cfg(test)]

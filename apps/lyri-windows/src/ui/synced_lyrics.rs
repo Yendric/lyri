@@ -2,9 +2,9 @@ use std::time::Duration;
 
 use windows_reactor::*;
 
-use super::common::{empty_state, format_duration};
-use crate::now_playing::{NowPlayingController, TrackKey};
-use lyri_core::lyrics::{TimedLine, active_line_index};
+use super::common::empty_state;
+use crate::now_playing::NowPlayingController;
+use lyri_core::lyrics::{TimedLine, TrackKey, active_line_index, format_duration};
 
 #[derive(Clone, PartialEq)]
 pub(super) struct SyncedLyricsProps {
@@ -32,9 +32,12 @@ const LYRIC_EDGE_PADDING: f64 = 240.0;
 const LYRIC_MIN_TEXT_WIDTH: f64 = 360.0;
 
 pub(super) fn synced_lyrics(props: &SyncedLyricsProps, cx: &mut RenderCx) -> Element {
-    let Some(active) = active_line_index(&props.lines, props.position) else {
+    if props.lines.is_empty() {
         return empty_state("No timed lyric lines found.");
-    };
+    }
+
+    // None until the first line's timestamp: no line is highlighted yet.
+    let active = active_line_index(&props.lines, props.position);
 
     let scroll_handle = cx.use_ref(Option::<ScrollViewHandle>::None);
     let (scroll_ready, set_scroll_ready) = cx.use_state(false);
@@ -90,9 +93,9 @@ pub(super) fn synced_lyrics(props: &SyncedLyricsProps, cx: &mut RenderCx) -> Ele
             *handle_for_ready.borrow_mut() = Some(handle);
             set_scroll_ready.call(true);
         })
-        .on_resize(move |_width, _height| {
+        .on_resize(move |width, height| {
             let active = *active_for_resize.borrow();
-            let target_offset = lyric_scroll_target(&lines_for_resize, active, _width, _height);
+            let target_offset = lyric_scroll_target(&lines_for_resize, active, width, height);
             if let Some(handle) = handle_for_resize.borrow().as_ref() {
                 let _ = handle.scroll_to_vertical_offset(target_offset);
             }
@@ -111,13 +114,15 @@ fn spacer(height: f64) -> Element {
 
 fn render_lyric_line(
     index: usize,
-    active: usize,
+    active: Option<usize>,
     line: &TimedLine,
     viewport_width: f64,
     seek: Option<LyricsSeekTarget>,
 ) -> Element {
-    let is_active = index == active;
-    let distance = index.abs_diff(active);
+    let is_active = active == Some(index);
+    // Before the first line starts, fade lines by distance from the top so
+    // the upcoming lyrics are visible without highlighting any of them.
+    let distance = active.map_or(index + 1, |active| index.abs_diff(active));
     let active_font = responsive_active_font(viewport_width);
     let inactive_font = responsive_inactive_font(viewport_width);
     let font_size = if is_active {
@@ -171,22 +176,22 @@ fn render_lyric_line(
 
 fn lyric_scroll_target(
     lines: &[TimedLine],
-    active: usize,
+    active: Option<usize>,
     viewport_width: f64,
     viewport_height: f64,
 ) -> f64 {
-    let active = active.min(lines.len().saturating_sub(1));
+    let anchor = active.unwrap_or(0).min(lines.len().saturating_sub(1));
     let child_top: f64 = LYRIC_EDGE_PADDING
         + LYRIC_SPACING
         + lines
             .iter()
-            .take(active)
+            .take(anchor)
             .map(|line| estimated_lyric_height(line, false, viewport_width) + LYRIC_SPACING)
             .sum::<f64>();
 
     let child_height = lines
-        .get(active)
-        .map(|line| estimated_lyric_height(line, true, viewport_width))
+        .get(anchor)
+        .map(|line| estimated_lyric_height(line, active.is_some(), viewport_width))
         .unwrap_or(0.0);
     let total_height = lyric_total_height(lines, active, viewport_width);
     let scrollable_height = (total_height - viewport_height).max(0.0);
@@ -195,11 +200,11 @@ fn lyric_scroll_target(
     target.clamp(0.0, scrollable_height)
 }
 
-fn lyric_total_height(lines: &[TimedLine], active: usize, viewport_width: f64) -> f64 {
+fn lyric_total_height(lines: &[TimedLine], active: Option<usize>, viewport_width: f64) -> f64 {
     let line_height = lines
         .iter()
         .enumerate()
-        .map(|(index, line)| estimated_lyric_height(line, index == active, viewport_width))
+        .map(|(index, line)| estimated_lyric_height(line, active == Some(index), viewport_width))
         .sum::<f64>();
     let gaps = lines.len() as f64;
 

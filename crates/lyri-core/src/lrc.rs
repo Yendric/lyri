@@ -51,22 +51,19 @@ fn parse_timestamp(stamp: &str) -> Option<Duration> {
 
     let millis = if fraction.is_empty() {
         0
+    } else if fraction.chars().all(|c| c.is_ascii_digit()) {
+        let digits = fraction.chars().take(3).collect::<String>();
+        format!("{digits:0<3}").parse::<u64>().ok()?
     } else {
-        let digits = fraction
-            .chars()
-            .take(3)
-            .filter(|c| c.is_ascii_digit())
-            .collect::<String>();
-        if digits.len() != fraction.len().min(3) {
-            return None;
-        }
-        let padded = format!("{digits:0<3}");
-        padded.parse::<u64>().ok()?
+        return None;
     };
 
-    Some(Duration::from_millis(
-        (minutes * 60 + seconds) * 1000 + millis,
-    ))
+    let total_millis = minutes
+        .checked_mul(60)?
+        .checked_add(seconds)?
+        .checked_mul(1000)?
+        .checked_add(millis)?;
+    Some(Duration::from_millis(total_millis))
 }
 
 #[cfg(test)]
