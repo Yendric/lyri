@@ -599,6 +599,7 @@ version = "0.1.0"
 dependencies = [
  "lyri-core",
  "lyri-providers",
+ "lyri-server",
  "tokio",
  "windows",
  "windows-reactor",

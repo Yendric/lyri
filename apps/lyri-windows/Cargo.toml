@@ -10,7 +10,8 @@ path = "src/main.rs"
 [dependencies]
 lyri-core.workspace = true
 lyri-providers.workspace = true
-tokio.workspace = true
+lyri-server.workspace = true
+tokio = { workspace = true, features = ["sync", "time"] }
 windows = { version = "0.62.2", features = [
     "Foundation",
     "Media",

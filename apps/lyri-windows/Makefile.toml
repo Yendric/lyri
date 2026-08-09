@@ -3,8 +3,16 @@ APP_EXE = "lyri-app.exe"
 TARGET_DIR = "..\\..\\target"
 PAYLOAD_DIR = "..\\..\\target\\msix-payload"
 
+# The web view is embedded into the binary at compile time (lyri-server's
+# build script), so it must be built first.
+[tasks.build-web]
+private = true
+command = "pnpm"
+args = ["-C", "..\\lyri-web", "build"]
+
 [tasks.build-release]
 private = true
+dependencies = ["build-web"]
 command = "cargo"
 args = ["build", "--release"]
 

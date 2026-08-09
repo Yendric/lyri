@@ -1,5 +1,6 @@
 #![windows_subsystem = "windows"]
 
+mod external_source;
 mod now_playing;
 mod ui;
 

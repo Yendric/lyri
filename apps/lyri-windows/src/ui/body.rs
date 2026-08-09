@@ -3,14 +3,15 @@ use windows_reactor::*;
 use super::common::{centered_stack, empty_state};
 use super::responsive_content_padding;
 use super::synced_lyrics::{LyricsSeekTarget, SyncedLyricsProps, synced_lyrics};
-use crate::now_playing::{NowPlaying, NowPlayingController};
+use crate::external_source::PlaybackControls;
+use crate::now_playing::NowPlaying;
 use lyri_core::lyrics::{ActiveLyrics, LyricsResult};
 
 pub(super) fn render_body(
     playback: Option<&NowPlaying>,
     lyrics: ActiveLyrics<'_>,
     status: &str,
-    playback_controls: Option<NowPlayingController>,
+    playback_controls: Option<PlaybackControls>,
     cx: &mut RenderCx,
 ) -> Element {
     let inner_size = cx.use_inner_size();

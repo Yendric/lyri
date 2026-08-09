@@ -1,5 +1,7 @@
-use std::sync::{Arc, mpsc};
+use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+
+use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 
 use windows::Foundation::TypedEventHandler;
 use windows::Media::Control::{
@@ -47,16 +49,46 @@ impl NowPlaying {
             duration: self.duration,
         }
     }
+
+    /// Playback mirrored from a remote Lyri host; positions extrapolate from
+    /// the moment the state was received.
+    pub fn remote(
+        title: String,
+        artist: String,
+        album: String,
+        duration: Option<Duration>,
+        position: Duration,
+        is_playing: bool,
+        can_seek: bool,
+    ) -> Self {
+        Self {
+            key: TrackKey::new(&title, &artist),
+            title,
+            artist,
+            album,
+            duration,
+            position,
+            is_playing,
+            can_seek,
+            playback_rate: 1.0,
+            observed_at: Instant::now(),
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
 pub struct NowPlayingController {
-    tx: mpsc::Sender<WatchCommand>,
+    tx: UnboundedSender<WatchCommand>,
 }
 
 impl NowPlayingController {
     pub fn seek_to(&self, key: TrackKey, position: Duration) -> bool {
         self.tx.send(WatchCommand::SeekTo { key, position }).is_ok()
+    }
+
+    /// Stops the watcher thread and unregisters its media-session events.
+    pub fn shutdown(&self) {
+        let _ = self.tx.send(WatchCommand::Shutdown);
     }
 }
 
@@ -71,6 +103,7 @@ enum WatchCommand {
     Refresh,
     Rebind,
     SeekTo { key: TrackKey, position: Duration },
+    Shutdown,
 }
 
 type Emit = Arc<dyn Fn(NowPlayingEvent) + Send + Sync>;
@@ -81,7 +114,7 @@ type SessionHandler<TArgs> = TypedEventHandler<GlobalSystemMediaTransportControl
 pub fn spawn_now_playing_events(
     emit: impl Fn(NowPlayingEvent) + Send + Sync + 'static,
 ) -> NowPlayingController {
-    let (tx, rx) = mpsc::channel();
+    let (tx, rx) = unbounded_channel();
     let controller = NowPlayingController { tx: tx.clone() };
     let emit = Arc::new(emit);
     let thread_emit = emit.clone();
@@ -97,8 +130,8 @@ pub fn spawn_now_playing_events(
 
 struct NowPlayingWatcher {
     manager: GlobalSystemMediaTransportControlsSessionManager,
-    tx: mpsc::Sender<WatchCommand>,
-    rx: mpsc::Receiver<WatchCommand>,
+    tx: UnboundedSender<WatchCommand>,
+    rx: UnboundedReceiver<WatchCommand>,
     emit: Emit,
     _manager_events: ManagerEvents,
     session: Option<SessionRegistration>,
@@ -107,8 +140,8 @@ struct NowPlayingWatcher {
 
 impl NowPlayingWatcher {
     fn run(
-        tx: mpsc::Sender<WatchCommand>,
-        rx: mpsc::Receiver<WatchCommand>,
+        tx: UnboundedSender<WatchCommand>,
+        rx: UnboundedReceiver<WatchCommand>,
         emit: Emit,
     ) -> Result<()> {
         unsafe { RoInitialize(RO_INIT_MULTITHREADED) }?;
@@ -128,11 +161,12 @@ impl NowPlayingWatcher {
 
         watcher.rebind();
 
-        while let Ok(command) = watcher.rx.recv() {
+        while let Some(command) = watcher.rx.blocking_recv() {
             match command {
                 WatchCommand::Refresh => watcher.refresh(),
                 WatchCommand::Rebind => watcher.rebind(),
                 WatchCommand::SeekTo { key, position } => watcher.seek_to(&key, position),
+                WatchCommand::Shutdown => break,
             }
         }
 
@@ -201,7 +235,7 @@ struct ManagerEvents {
 /// Builds a handler that forwards `command` to the watcher and registers it
 /// through `register`, reporting registration failures via `emit`.
 fn watch_event<TSource, TArgs>(
-    tx: &mpsc::Sender<WatchCommand>,
+    tx: &UnboundedSender<WatchCommand>,
     command: WatchCommand,
     emit: &dyn Fn(NowPlayingEvent),
     register: impl FnOnce(&TypedEventHandler<TSource, TArgs>) -> Result<i64>,
@@ -225,7 +259,7 @@ where
 impl ManagerEvents {
     fn new(
         manager: &GlobalSystemMediaTransportControlsSessionManager,
-        tx: &mpsc::Sender<WatchCommand>,
+        tx: &UnboundedSender<WatchCommand>,
         emit: &dyn Fn(NowPlayingEvent),
     ) -> Self {
         let (current_token, current_handler) =
@@ -271,7 +305,7 @@ struct SessionRegistration {
 impl SessionRegistration {
     fn new(
         session: GlobalSystemMediaTransportControlsSession,
-        tx: &mpsc::Sender<WatchCommand>,
+        tx: &UnboundedSender<WatchCommand>,
         emit: &dyn Fn(NowPlayingEvent),
     ) -> Self {
         let (timeline_token, timeline_handler) =

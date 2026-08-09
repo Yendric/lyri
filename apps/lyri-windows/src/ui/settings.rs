@@ -1,6 +1,8 @@
+use std::net::{IpAddr, SocketAddr};
+
 use windows_reactor::*;
 
-pub(super) const DEFAULT_LRCLIB_URL: &str = "https://lrclib.net";
+const DEFAULT_LRCLIB_URL: &str = "https://lrclib.net";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum SongSource {
@@ -24,15 +26,40 @@ impl SongSource {
     }
 }
 
+/// Where playback state comes from, as configured in the settings pane.
+#[derive(Clone, Debug, PartialEq)]
+pub(super) enum SourceConfig {
+    System,
+    External { host: String, port: u16 },
+}
+
+/// Web-view hosting configuration, present when hosting is enabled.
+#[derive(Clone, Debug, PartialEq)]
+pub(super) struct WebServerConfig {
+    bind_address: String,
+    port: u16,
+    pub(super) allow_seek: bool,
+}
+
+impl WebServerConfig {
+    pub(super) fn socket_addr(&self) -> std::result::Result<SocketAddr, String> {
+        self.bind_address
+            .trim()
+            .parse::<IpAddr>()
+            .map(|ip| SocketAddr::new(ip, self.port))
+            .map_err(|_| format!("Invalid bind address: {}", self.bind_address.trim()))
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub(super) struct SettingsState {
     song_source: SongSource,
     external_lyri_address: String,
-    external_lyri_port: f64,
+    external_lyri_port: u16,
     lrclib_server_url: String,
     web_server_enabled: bool,
     web_server_bind_address: String,
-    web_server_port: f64,
+    web_server_port: u16,
     web_server_allow_seek: bool,
 }
 
@@ -41,14 +68,50 @@ impl Default for SettingsState {
         Self {
             song_source: SongSource::System,
             external_lyri_address: "127.0.0.1".to_string(),
-            external_lyri_port: 8080.0,
+            external_lyri_port: 8080,
             lrclib_server_url: DEFAULT_LRCLIB_URL.to_string(),
             web_server_enabled: false,
             web_server_bind_address: "0.0.0.0".to_string(),
-            web_server_port: 8080.0,
+            web_server_port: 8080,
             web_server_allow_seek: false,
         }
     }
+}
+
+impl SettingsState {
+    pub(super) fn source(&self) -> SourceConfig {
+        match self.song_source {
+            SongSource::System => SourceConfig::System,
+            SongSource::ExternalLyri => SourceConfig::External {
+                host: self.external_lyri_address.trim().to_string(),
+                port: self.external_lyri_port,
+            },
+        }
+    }
+
+    pub(super) fn lrclib_url(&self) -> String {
+        let url = self.lrclib_server_url.trim();
+        if url.is_empty() {
+            DEFAULT_LRCLIB_URL.to_string()
+        } else {
+            url.to_string()
+        }
+    }
+
+    pub(super) fn web_server(&self) -> Option<WebServerConfig> {
+        self.web_server_enabled.then(|| WebServerConfig {
+            bind_address: self.web_server_bind_address.clone(),
+            port: self.web_server_port,
+            allow_seek: self.web_server_allow_seek,
+        })
+    }
+}
+
+/// A cleared NumberBox reports NaN; callers keep the previous port then.
+fn parse_port(value: f64) -> Option<u16> {
+    value
+        .is_finite()
+        .then(|| value.round().clamp(1.0, 65535.0) as u16)
 }
 
 /// Builds a change handler that clones the current settings, applies one
@@ -71,6 +134,7 @@ pub(super) fn render_settings_pane(
     settings: SettingsState,
     set_settings: SetState<SettingsState>,
     is_dark: bool,
+    web_server_error: Option<&str>,
     close_settings: impl Fn() + 'static,
 ) -> Element {
     let close_button = button("\u{E711}")
@@ -129,14 +193,16 @@ pub(super) fn render_settings_pane(
                 |settings, value: String| settings.external_lyri_address = value,
             ));
 
-        let external_port = NumberBox::new(settings.external_lyri_port)
+        let external_port = NumberBox::new(f64::from(settings.external_lyri_port))
             .header("Port")
             .range(1.0, 65535.0)
             .on_value_changed(update_settings(
                 &settings,
                 &set_settings,
                 |settings, value: f64| {
-                    settings.external_lyri_port = value.round().clamp(1.0, 65535.0);
+                    if let Some(port) = parse_port(value) {
+                        settings.external_lyri_port = port;
+                    }
                 },
             ));
 
@@ -184,7 +250,7 @@ pub(super) fn render_settings_pane(
             |settings, value: String| settings.web_server_bind_address = value,
         ));
 
-    let port = NumberBox::new(settings.web_server_port)
+    let port = NumberBox::new(f64::from(settings.web_server_port))
         .header("Port")
         .range(1.0, 65535.0)
         .enabled(web_enabled)
@@ -192,7 +258,9 @@ pub(super) fn render_settings_pane(
             &settings,
             &set_settings,
             |settings, value: f64| {
-                settings.web_server_port = value.round().clamp(1.0, 65535.0);
+                if let Some(port) = parse_port(value) {
+                    settings.web_server_port = port;
+                }
             },
         ));
 
@@ -207,9 +275,21 @@ pub(super) fn render_settings_pane(
             |settings, value: bool| settings.web_server_allow_seek = value,
         ));
 
+    let mut web_server_items = vec![
+        Element::from(host_toggle),
+        Element::from(bind_address),
+        Element::from(port),
+        Element::from(allow_seek),
+    ];
+    if let Some(error) = web_server_error {
+        web_server_items.push(Element::from(
+            text_block(error).font_size(12.0).opacity(0.8).wrap(),
+        ));
+    }
+
     let web_server = settings_section(
         "Web Server",
-        vstack((host_toggle, bind_address, port, allow_seek))
+        vstack(web_server_items)
             .spacing(14.0)
             .horizontal_alignment(HorizontalAlignment::Stretch),
     );

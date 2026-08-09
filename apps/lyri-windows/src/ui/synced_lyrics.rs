@@ -3,7 +3,7 @@ use std::time::Duration;
 use windows_reactor::*;
 
 use super::common::empty_state;
-use crate::now_playing::NowPlayingController;
+use crate::external_source::PlaybackControls;
 use lyri_core::lyrics::{TimedLine, TrackKey, active_line_index, format_duration};
 
 #[derive(Clone, PartialEq)]
@@ -18,7 +18,7 @@ pub(super) struct SyncedLyricsProps {
 #[derive(Clone)]
 pub(super) struct LyricsSeekTarget {
     pub(super) key: TrackKey,
-    pub(super) controller: NowPlayingController,
+    pub(super) controller: PlaybackControls,
 }
 
 impl PartialEq for LyricsSeekTarget {
