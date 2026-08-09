@@ -1,0 +1,5 @@
+[submodule "windows-rs"]
+	path = windows-rs
+	url = https://github.com/Yendric/windows-rs.git
+	branch = lyri
+	shallow = true
