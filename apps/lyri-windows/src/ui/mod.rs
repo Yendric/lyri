@@ -5,7 +5,7 @@ use tokio::runtime::{Builder, Runtime};
 use windows_reactor::*;
 
 use lyri_providers::LyricsProviderChain;
-use lyri_providers::worker::{LyricsStatus, fetch_lyrics};
+use lyri_core::lyrics::LyricsStatus;
 
 mod body;
 mod common;
@@ -64,7 +64,7 @@ pub fn app(cx: &mut RenderCx) -> Element {
 
             let setter = set_lyrics.clone();
             let task = lyrics_runtime.spawn(async move {
-                setter.call(fetch_lyrics(lyrics_providers, key, query).await);
+                setter.call(lyrics_providers.fetch(key, &query).await);
             });
 
             Some(move || task.abort())

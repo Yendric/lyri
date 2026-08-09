@@ -1,8 +1,6 @@
-use anyhow::Result;
-use lyri_core::lyrics::{LyricsProvider, LyricsQuery, LyricsResult};
+use lyri_core::lyrics::{LyricsProvider, LyricsQuery, LyricsStatus, TrackKey};
 
 pub mod lrclib;
-pub mod worker;
 
 pub struct LyricsProviderChain {
     providers: Vec<Box<dyn LyricsProvider>>,
@@ -17,13 +15,15 @@ impl LyricsProviderChain {
         Self::new(vec![Box::new(lrclib::LrclibProvider::new(base_url))])
     }
 
-    pub async fn fetch(&self, query: &LyricsQuery) -> Result<Option<LyricsResult>> {
+    pub async fn fetch(&self, key: TrackKey, query: &LyricsQuery) -> LyricsStatus {
         for provider in &self.providers {
-            if let Some(result) = provider.fetch(query).await? {
-                return Ok(Some(result));
+            match provider.fetch(query).await {
+                Ok(Some(result)) => return LyricsStatus::Ready(key, result),
+                Ok(None) => {}
+                Err(error) => return LyricsStatus::Error(key, format!("{error:#}")),
             }
         }
 
-        Ok(None)
+        LyricsStatus::Missing(key)
     }
 }
