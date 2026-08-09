@@ -3,7 +3,7 @@ use windows_reactor::*;
 use crate::now_playing::NowPlaying;
 use lyri_core::lyrics::{artist_album_label, format_duration};
 
-pub(super) fn render_header(playback: Option<&NowPlaying>, status: &str) -> Element {
+pub(super) fn render_header(playback: Option<&NowPlaying>, status: &str) -> StackPanel {
     let title_text = playback
         .map(|playback| playback.title.as_str())
         .filter(|title| !title.trim().is_empty())
@@ -34,7 +34,6 @@ pub(super) fn render_header(playback: Option<&NowPlaying>, status: &str) -> Elem
     ))
     .spacing(4.0)
     .horizontal_alignment(HorizontalAlignment::Stretch)
-    .into()
 }
 
 fn format_playback_time(playback: &NowPlaying) -> String {

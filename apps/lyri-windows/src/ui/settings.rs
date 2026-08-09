@@ -136,7 +136,7 @@ pub(super) fn render_settings_pane(
     is_dark: bool,
     web_server_error: Option<&str>,
     close_settings: impl Fn() + 'static,
-) -> Element {
+) -> Border {
     let close_button = button("\u{E711}")
         .on_click(close_settings)
         .font_family("Segoe MDL2 Assets")
@@ -164,7 +164,7 @@ pub(super) fn render_settings_pane(
             .header("Theme")
             .on_content("Dark")
             .off_content("Light")
-            .on_changed(|dark| {
+            .on_toggled(|dark| {
                 set_requested_theme(if dark {
                     RequestedTheme::Dark
                 } else {
@@ -186,8 +186,8 @@ pub(super) fn render_settings_pane(
     if settings.song_source == SongSource::ExternalLyri {
         let external_address = text_box(settings.external_lyri_address.clone())
             .header("IP address")
-            .placeholder("127.0.0.1")
-            .on_changed(update_settings(
+            .placeholder_text("127.0.0.1")
+            .on_text_changed(update_settings(
                 &settings,
                 &set_settings,
                 |settings, value: String| settings.external_lyri_address = value,
@@ -221,8 +221,8 @@ pub(super) fn render_settings_pane(
         "LRCLIB",
         text_box(settings.lrclib_server_url.clone())
             .header("Server URL")
-            .placeholder(DEFAULT_LRCLIB_URL)
-            .on_changed(update_settings(
+            .placeholder_text(DEFAULT_LRCLIB_URL)
+            .on_text_changed(update_settings(
                 &settings,
                 &set_settings,
                 |settings, value: String| settings.lrclib_server_url = value,
@@ -234,7 +234,7 @@ pub(super) fn render_settings_pane(
         .header("Host local web view")
         .on_content("On")
         .off_content("Off")
-        .on_changed(update_settings(
+        .on_toggled(update_settings(
             &settings,
             &set_settings,
             |settings, value: bool| settings.web_server_enabled = value,
@@ -242,9 +242,9 @@ pub(super) fn render_settings_pane(
 
     let bind_address = text_box(settings.web_server_bind_address.clone())
         .header("Bind address")
-        .placeholder("0.0.0.0")
+        .placeholder_text("0.0.0.0")
         .enabled(web_enabled)
-        .on_changed(update_settings(
+        .on_text_changed(update_settings(
             &settings,
             &set_settings,
             |settings, value: String| settings.web_server_bind_address = value,
@@ -269,7 +269,7 @@ pub(super) fn render_settings_pane(
         .on_content("Allowed")
         .off_content("View only")
         .enabled(web_enabled)
-        .on_changed(update_settings(
+        .on_toggled(update_settings(
             &settings,
             &set_settings,
             |settings, value: bool| settings.web_server_allow_seek = value,
@@ -299,7 +299,7 @@ pub(super) fn render_settings_pane(
             .spacing(22.0)
             .horizontal_alignment(HorizontalAlignment::Stretch),
     )
-    .vertical_scroll_bar_visibility(ScrollViewScrollBarVisibility::Auto);
+    .vertical_scroll_bar_visibility(ScrollingScrollBarVisibility::Auto);
 
     border(content)
         .padding(22.0)
@@ -309,7 +309,6 @@ pub(super) fn render_settings_pane(
         .border_thickness(Thickness::uniform(1.0))
         .horizontal_alignment(HorizontalAlignment::Stretch)
         .vertical_alignment(VerticalAlignment::Stretch)
-        .into()
 }
 
 fn settings_section(title: &str, content: impl Into<Element>) -> Element {

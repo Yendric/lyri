@@ -89,7 +89,7 @@ pub(super) fn synced_lyrics(props: &SyncedLyricsProps, cx: &mut RenderCx) -> Ele
     let active_for_resize = active_index.clone();
     let lines_for_resize = props.lines.clone();
     scroll_view(list_stack)
-        .on_ready(move |handle| {
+        .on_mounted(move |handle| {
             *handle_for_ready.borrow_mut() = Some(handle);
             set_scroll_ready.call(true);
         })
@@ -100,8 +100,8 @@ pub(super) fn synced_lyrics(props: &SyncedLyricsProps, cx: &mut RenderCx) -> Ele
                 let _ = handle.scroll_to_vertical_offset(target_offset);
             }
         })
-        .horizontal_scroll_bar_visibility(ScrollViewScrollBarVisibility::Hidden)
-        .vertical_scroll_bar_visibility(ScrollViewScrollBarVisibility::Hidden)
+        .horizontal_scroll_bar_visibility(ScrollingScrollBarVisibility::Hidden)
+        .vertical_scroll_bar_visibility(ScrollingScrollBarVisibility::Hidden)
         .height(props.viewport_height)
         .horizontal_alignment(HorizontalAlignment::Stretch)
         .vertical_alignment(VerticalAlignment::Stretch)

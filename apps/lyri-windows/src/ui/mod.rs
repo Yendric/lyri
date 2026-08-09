@@ -373,7 +373,7 @@ fn render_app(
     let content_padding = responsive_content_padding(inner_size.width);
 
     let content = border(
-        grid((header.grid_row(0), body.grid_row(1)))
+        grid((header.grid_row(0), border(body).grid_row(1)))
             .rows(vec![GridLength::Auto, GridLength::Star(1.0)])
             .row_spacing(28.0)
             .horizontal_alignment(HorizontalAlignment::Stretch)
@@ -395,7 +395,7 @@ fn render_app(
     };
 
     let close_settings = set_settings_open.clone();
-    let app_content: Element = grid((
+    let app_content = grid((
         content.grid_row(0).with_key("lyrics-content"),
         render_settings_pane(
             settings_context.settings,
@@ -417,8 +417,7 @@ fn render_app(
         .horizontal_alignment(HorizontalAlignment::Right)
         .vertical_alignment(VerticalAlignment::Stretch),
     ))
-    .rows([GridLength::Star(1.0)])
-    .into();
+    .rows([GridLength::Star(1.0)]);
 
     grid((title_bar.grid_row(0), app_content.grid_row(1)))
         .rows([GridLength::Auto, GridLength::Star(1.0)])
