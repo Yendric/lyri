@@ -1,65 +1,171 @@
 <script>
-  const track = {
-    title: 'Holiday',
-    artist: 'Green Day',
-    duration: 232,
-    source: 'Lyrics from LRCLIB',
-    lines: [
-      { id: 'cha', timestamp: 14, text: 'Cha!' },
-      { id: 'falling-rain', timestamp: 23, text: 'Hear the sound of the falling rain' },
-      { id: 'armageddon', timestamp: 29, text: 'Coming down like an Armageddon flame (hey!)' },
-      { id: 'shame', timestamp: 34, text: 'The shame, the ones who died without a name' },
-      { id: 'dogs', timestamp: 40, text: 'Hear the dogs howling out of key' },
-      { id: 'hymn', timestamp: 47, text: 'To a hymn called "Faith and Misery" (hey!)' },
-      { id: 'company', timestamp: 54, text: 'And bleed, the company lost the war today, and' },
-      { id: 'dream', timestamp: 61, text: 'Oh I beg to dream and differ from the hollow lies' },
-      {
-        id: 'dawning',
-        timestamp: 68,
-        text: 'This is the dawning of the rest of our lives (whoa, oh, whoa, oh)'
-      },
-      { id: 'holiday', timestamp: 76, text: 'On holiday!' }
-    ]
-  };
+  const RECONNECT_DELAY_MS = 3000;
 
   let theme = $state('dark');
-  let position = $state(35);
+  let connected = $state(false);
+  let view = $state(null); // last ViewState from the host
+  let receivedAt = $state(0); // performance.now() at receipt
+  let now = $state(0); // ticked while playing to extrapolate the position
   let innerWidth = $state(1280);
-  let lyricViewport;
+  // $state so effects reading it re-run when the conditionally rendered
+  // lyrics viewport mounts and binds.
+  let lyricViewport = $state();
+  let socket;
 
-  // -1 until the first line's timestamp: no line is highlighted yet.
-  let activeIndex = $derived(track.lines.findLastIndex((line) => line.timestamp <= position));
+  // Follow the hosting Lyri instance over its WebSocket, reconnecting for
+  // as long as the page is open.
+  $effect(() => {
+    let disposed = false;
+    let retry;
 
-  let themeIcon = $derived(theme === 'dark' ? '\u2600\uFE0F' : '\uD83C\uDF19');
-  let contentPadding = $derived(responsiveContentPadding(innerWidth));
-  let viewportWidth = $derived(Math.max(innerWidth - contentPadding * 2, 220));
-  let progressLabel = $derived(`${formatTime(position)} / ${formatTime(track.duration)}`);
+    const connect = () => {
+      const protocol = location.protocol === 'https:' ? 'wss' : 'ws';
+      socket = new WebSocket(`${protocol}://${location.host}/ws`);
+      socket.onopen = () => {
+        connected = true;
+      };
+      socket.onmessage = (event) => {
+        const message = JSON.parse(event.data);
+        if (message.type === 'state') {
+          view = message;
+          receivedAt = performance.now();
+          now = receivedAt;
+        }
+      };
+      socket.onclose = () => {
+        connected = false;
+        view = null;
+        if (!disposed) {
+          retry = setTimeout(connect, RECONNECT_DELAY_MS);
+        }
+      };
+    };
+
+    connect();
+    return () => {
+      disposed = true;
+      clearTimeout(retry);
+      socket?.close();
+    };
+  });
+
+  let playback = $derived(view?.playback ?? null);
+  let lyrics = $derived(view?.lyrics ?? null);
 
   $effect(() => {
+    if (!playback?.isPlaying) {
+      return;
+    }
+
     const timer = setInterval(() => {
-      position = position >= track.duration ? 0 : position + 0.25;
+      now = performance.now();
     }, 250);
 
     return () => clearInterval(timer);
   });
 
-  // $effect runs after the DOM has been updated, so the active line's
-  // element already reflects the latest activeIndex.
-  $effect(() => {
-    const activeLine = lyricViewport?.querySelector(`[data-lyric-index="${activeIndex}"]`);
-    activeLine?.scrollIntoView({
-      behavior: 'smooth',
-      block: 'center',
-      inline: 'nearest'
-    });
+  let positionMs = $derived.by(() => {
+    if (!playback) {
+      return 0;
+    }
+
+    const elapsed = playback.isPlaying ? Math.max(0, now - receivedAt) : 0;
+    const position = playback.positionMs + elapsed;
+    return playback.durationMs == null ? position : Math.min(position, playback.durationMs);
   });
 
-  function formatTime(seconds) {
-    const safeSeconds = Math.max(0, Math.floor(seconds));
-    const minutes = Math.floor(safeSeconds / 60);
-    const remainingSeconds = safeSeconds % 60;
+  let lines = $derived(lyrics?.kind === 'synced' ? lyrics.lines : []);
+  // -1 until the first line's timestamp: no line is highlighted yet.
+  let activeIndex = $derived(lines.findLastIndex((line) => line.timestampMs <= positionMs));
 
-    return `${minutes}:${remainingSeconds.toString().padStart(2, '0')}`;
+  let status = $derived.by(() => {
+    if (!connected) return 'Connecting to Lyri...';
+    if (!playback) return 'Listening for media...';
+    switch (lyrics?.kind) {
+      case 'loading':
+        return 'Finding lyrics...';
+      case 'missing':
+        return 'No lyrics found.';
+      case 'error':
+        return 'Lyrics lookup failed.';
+      case undefined:
+        return 'Listening for media...';
+      default:
+        return `Lyrics from ${lyrics.source}`;
+    }
+  });
+
+  let emptyMessage = $derived.by(() => {
+    if (!connected) return 'Connecting to Lyri...';
+    if (!playback) return 'Play a song and Lyri will follow along.';
+    switch (lyrics?.kind) {
+      case 'missing':
+        return 'No lyrics found for this track.';
+      case 'error':
+        return lyrics.message || 'Could not load lyrics';
+      case 'instrumental':
+        return 'Instrumental track';
+      default:
+        return 'Finding lyrics...';
+    }
+  });
+
+  let title = $derived(playback?.title.trim() ? playback.title : 'Lyri');
+  let subtitle = $derived.by(() => {
+    if (!playback) return status;
+    const artist = playback.artist.trim();
+    const album = playback.album.trim();
+    if (artist && album) return `${artist} - ${album}`;
+    return artist || album || 'Unknown artist';
+  });
+  let progressLabel = $derived.by(() => {
+    if (!playback) return '';
+    const position = formatTime(positionMs);
+    const suffix = playback.isPlaying ? '' : ' paused';
+    return playback.durationMs == null
+      ? `${position}${suffix}`
+      : `${position} / ${formatTime(playback.durationMs)}${suffix}`;
+  });
+
+  let themeIcon = $derived(theme === 'dark' ? '☀️' : '🌙');
+  let contentPadding = $derived(responsiveContentPadding(innerWidth));
+  let viewportWidth = $derived(Math.max(innerWidth - contentPadding * 2, 220));
+
+  // Centers the active line. Read both reactive values before any early
+  // return, or the effect loses its dependencies and never re-runs.
+  $effect(() => {
+    const index = activeIndex;
+    const viewport = lyricViewport;
+    const activeLine = viewport?.querySelector(`[data-lyric-index="${index}"]`);
+    if (!viewport || !activeLine) {
+      return;
+    }
+
+    const centered =
+      activeLine.offsetTop - (viewport.clientHeight - activeLine.offsetHeight) / 2;
+    const top = Math.max(0, centered);
+    try {
+      viewport.scrollTo({ top });
+    } catch {
+      // Engines without ScrollToOptions support get an instant jump.
+      viewport.scrollTop = top;
+    }
+  });
+
+  function seekTo(line) {
+    if (!playback?.canSeek || socket?.readyState !== WebSocket.OPEN) {
+      return;
+    }
+
+    socket.send(JSON.stringify({ type: 'seek', positionMs: line.timestampMs }));
+  }
+
+  function formatTime(milliseconds) {
+    const totalSeconds = Math.max(0, Math.floor(milliseconds / 1000));
+    const minutes = Math.floor(totalSeconds / 60);
+    const seconds = totalSeconds % 60;
+
+    return `${minutes}:${seconds.toString().padStart(2, '0')}`;
   }
 
   function lyricLineStyle(isActive) {
@@ -114,7 +220,7 @@
   <meta name="theme-color" content={theme === 'dark' ? '#1b1c20' : '#eef2f8'} />
 </svelte:head>
 
-<div class={['lyri-shell', theme]} aria-label="Lyri live lyrics mockup">
+<div class={['lyri-shell', theme]} aria-label="Lyri live lyrics">
   <header class="titlebar">
     <div class="toolbar" aria-label="Theme controls">
       <button
@@ -131,30 +237,43 @@
 
   <main class="lyrics-screen">
     <section class="track-header" aria-label="Now playing">
-      <h1>{track.title}</h1>
-      <p>{track.artist}</p>
+      <h1>{title}</h1>
+      <p>{subtitle}</p>
       <time>{progressLabel}</time>
     </section>
 
-    <section class="lyrics-viewport" bind:this={lyricViewport} aria-label={track.source}>
-      <div class="lyrics-stack">
-        {#each track.lines as line, index (line.id)}
-          {@const distance = activeIndex < 0 ? index + 1 : Math.abs(index - activeIndex)}
-          <p
-            class={[
-              'lyric-line',
-              distance === 0 && 'active',
-              distance === 1 && 'near',
-              distance === 2 && 'far',
-              distance > 2 && 'distant'
-            ]}
-            data-lyric-index={index}
-            style={lyricLineStyle(distance === 0)}
-          >
-            {line.text}
-          </p>
-        {/each}
-      </div>
-    </section>
+    {#if lyrics?.kind === 'synced'}
+      <section class="lyrics-viewport" bind:this={lyricViewport} aria-label={status}>
+        <div class="lyrics-stack">
+          {#each lines as line, index}
+            {@const distance = activeIndex < 0 ? index + 1 : Math.abs(index - activeIndex)}
+            <p
+              class={[
+                'lyric-line',
+                playback?.canSeek && 'seekable',
+                distance === 0 && 'active',
+                distance === 1 && 'near',
+                distance === 2 && 'far',
+                distance > 2 && 'distant'
+              ]}
+              data-lyric-index={index}
+              style={lyricLineStyle(distance === 0)}
+              title={playback?.canSeek ? `Jump to ${formatTime(line.timestampMs)}` : undefined}
+              onclick={() => seekTo(line)}
+            >
+              {line.text}
+            </p>
+          {/each}
+        </div>
+      </section>
+    {:else if lyrics?.kind === 'plain'}
+      <section class="lyrics-viewport" aria-label={status}>
+        <p class="plain-lyrics">{lyrics.text}</p>
+      </section>
+    {:else}
+      <section class="empty-state">
+        <p>{emptyMessage}</p>
+      </section>
+    {/if}
   </main>
 </div>

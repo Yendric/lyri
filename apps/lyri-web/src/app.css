@@ -136,6 +136,9 @@ button {
 }
 
 .lyrics-viewport {
+  /* Positioned so lyric lines' offsetTop is relative to this container,
+     which the auto-scroll math depends on. */
+  position: relative;
   min-height: 0;
   overflow-x: hidden;
   overflow-y: auto;
@@ -195,6 +198,34 @@ button {
   color: var(--text-strong);
   font-weight: 700;
   transform: scale(1.015);
+}
+
+.lyric-line.seekable {
+  cursor: pointer;
+}
+
+.plain-lyrics {
+  max-width: 640px;
+  margin: 0 auto;
+  padding: 24px 0 240px;
+  color: var(--text-soft);
+  font-size: 20px;
+  line-height: 1.5;
+  text-align: center;
+  white-space: pre-wrap;
+}
+
+.empty-state {
+  display: grid;
+  place-items: center;
+  min-height: 0;
+}
+
+.empty-state p {
+  margin: 0;
+  color: var(--text-soft);
+  font-size: 18px;
+  text-align: center;
 }
 
 @media (min-width: 1400px) {
