@@ -1,4 +1,6 @@
-//! Shared server surface for exposing Lyri state to other clients.
-//!
-//! The concrete HTTP/WebSocket implementation can live here once the server
-//! feature exists, so each native app can host the same protocol.
+//! [`host`] serves the built web view and streams state over WebSocket;
+//! [`client`] mirrors a remote host. Both speak the JSON [`protocol`].
+
+pub mod client;
+pub mod host;
+pub mod protocol;
