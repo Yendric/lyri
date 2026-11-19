@@ -1,0 +1,17 @@
+[package]
+name = "lyri-linux"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "lyri-gtk"
+path = "src/main.rs"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+futures-util = { version = "0.3", default-features = false }
+gtk = { package = "gtk4", version = "0.10", features = ["v4_12"] }
+lyri-core.workspace = true
+lyri-providers.workspace = true
+lyri-server.workspace = true
+tokio = { workspace = true, features = ["macros", "sync", "time"] }
+zbus = { version = "5", default-features = false, features = ["tokio"] }

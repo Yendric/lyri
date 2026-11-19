@@ -1,5 +1,6 @@
 [workspace]
 members = [
+    "apps/lyri-linux",
     "apps/lyri-windows",
     "crates/lyri-core",
     "crates/lyri-providers",

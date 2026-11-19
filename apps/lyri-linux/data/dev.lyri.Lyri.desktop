@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Lyri
+Comment=Lyrics that follow your music
+Exec=lyri-gtk
+Icon=dev.lyri.Lyri
+Terminal=false
+Categories=Audio;Music;GTK;

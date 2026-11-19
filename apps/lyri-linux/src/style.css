@@ -1,0 +1,114 @@
+.content {
+  padding: 12px 36px 0;
+}
+
+.track-header {
+  background-color: @theme_bg_color;
+  padding-bottom: 8px;
+}
+
+.track-title {
+  font-size: 22px;
+  font-weight: 600;
+}
+
+.muted {
+  font-size: 13px;
+  opacity: 0.68;
+}
+
+.dim {
+  font-size: 12px;
+  opacity: 0.56;
+}
+
+.empty {
+  font-size: 18px;
+  opacity: 0.68;
+}
+
+.error-title {
+  font-size: 20px;
+  font-weight: 600;
+}
+
+.error-detail {
+  font-size: 13px;
+  opacity: 0.65;
+}
+
+.plain-lyrics {
+  font-size: 20px;
+  opacity: 0.86;
+  padding: 96px 0 24px;
+}
+
+.lyrics-list {
+  padding: 240px 0;
+}
+
+.lyric-line {
+  font-size: 20px;
+  font-weight: 500;
+  min-height: 56px;
+  transition: opacity 180ms ease-out, font-size 180ms ease-out;
+}
+
+.lyric-line.active {
+  font-size: 28px;
+  font-weight: 700;
+  opacity: 1;
+}
+
+.lyric-line.near {
+  opacity: 0.58;
+}
+
+.lyric-line.far {
+  opacity: 0.28;
+}
+
+.lyric-line.distant {
+  opacity: 0.1;
+}
+
+.lyric-line.seekable:hover {
+  opacity: 0.8;
+}
+
+.lyric-line.seekable.active:hover {
+  opacity: 1;
+}
+
+.settings-pane {
+  min-width: 300px;
+  padding: 22px;
+  margin: 12px;
+  border-radius: 8px;
+  border: 1px solid @borders;
+  background-color: @theme_base_color;
+}
+
+.settings-title {
+  font-size: 20px;
+  font-weight: 600;
+}
+
+.section-title {
+  font-size: 13px;
+  font-weight: 600;
+  opacity: 0.68;
+}
+
+.settings-row {
+  min-height: 32px;
+}
+
+.settings-row entry {
+  min-width: 140px;
+}
+
+.settings-error {
+  font-size: 12px;
+  opacity: 0.8;
+}
