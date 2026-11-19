@@ -8,6 +8,7 @@ use lyri_core::lyrics::{TimedLine, TrackKey, active_line_index, format_duration}
 
 #[derive(Clone, PartialEq)]
 pub(super) struct SyncedLyricsInput {
+    pub(super) track: TrackKey,
     pub(super) lines: Vec<TimedLine>,
     pub(super) position: Duration,
     /// Width the lines are laid out for; sizes the fonts.
@@ -31,56 +32,108 @@ const LYRIC_SPACING: f64 = 16.0;
 const LYRIC_EDGE_PADDING: f64 = 240.0;
 const LYRIC_MIN_TEXT_WIDTH: f64 = 360.0;
 const LINE_FADE: Duration = Duration::from_millis(180);
+/// Offset drift tolerated before a scroll counts as the user's.
+const SCROLL_TOLERANCE: f64 = 1.0;
 
 #[derive(Clone)]
 pub(super) enum Message {
     View(ScrollViewMetrics),
+    Scrolled(u64, f64, Result<ScrollViewMetrics, IntegrationError>),
     Seek(Duration),
+    Follow,
 }
 
-/// Keeps the active lyric line centered in its scroll view.
+/// Keeps the active lyric line centered in its scroll view until the user
+/// scrolls it themselves.
 pub(super) struct SyncedLyrics {
     view: ElementRef<ScrollView>,
     _observation: ElementObservation,
-    /// Viewport height last reported by the scroll view, once it is bound.
-    viewport_height: Option<f64>,
+    track: TrackKey,
+    following: bool,
+    /// Last reported metrics, once the scroll view is bound.
+    metrics: Option<ScrollViewMetrics>,
     scrolled_to: Option<f64>,
+    /// Our scroll that is still animating; its offset changes are expected.
+    pending_scroll: Option<u64>,
+    next_scroll: u64,
 }
 
 impl Component for SyncedLyrics {
     type Input = SyncedLyricsInput;
     type Message = Message;
 
-    fn create(_: &SyncedLyricsInput, context: &ComponentContext<Self>) -> Self {
+    fn create(input: &SyncedLyricsInput, context: &ComponentContext<Self>) -> Self {
         let view = ElementRef::new();
         let observed = context.callback(Message::View);
         let observation = view.observe_view(move |metrics| observed.call(metrics));
         Self {
             view,
             _observation: observation,
-            viewport_height: None,
+            track: input.track.clone(),
+            following: true,
+            metrics: None,
             scrolled_to: None,
+            pending_scroll: None,
+            next_scroll: 0,
         }
     }
 
-    fn input_changed(&mut self, input: &SyncedLyricsInput, _: &ComponentContext<Self>) {
-        self.scroll_to_active(input);
+    fn input_changed(&mut self, input: &SyncedLyricsInput, context: &ComponentContext<Self>) {
+        if self.track != input.track {
+            self.track = input.track.clone();
+            self.follow();
+        }
+        self.scroll_to_active(input, context);
     }
 
     fn update(&mut self, message: Message, context: &ComponentContext<Self>) {
         let input = context.input();
         match message {
             Message::View(metrics) => {
-                // Also reported for every scroll step; only a resize matters.
-                if self.viewport_height != Some(metrics.viewport_height) {
-                    self.viewport_height = Some(metrics.viewport_height);
-                    self.scroll_to_active(input);
+                let previous = self.metrics.replace(metrics);
+                let resized = previous.is_none_or(|previous| {
+                    previous.viewport_height != metrics.viewport_height
+                        || previous.extent_height != metrics.extent_height
+                });
+                if resized {
+                    // Layout changes can shift the offset too; re-center instead.
+                    self.scrolled_to = None;
+                    self.scroll_to_active(input, context);
+                } else if self.pending_scroll.is_none()
+                    && previous.is_some_and(|previous| {
+                        (previous.vertical_offset - metrics.vertical_offset).abs()
+                            > SCROLL_TOLERANCE
+                    })
+                {
+                    self.following = false;
+                }
+            }
+            Message::Scrolled(id, target, result) => {
+                if self.pending_scroll != Some(id) {
+                    return;
+                }
+                self.pending_scroll = None;
+                // A scroll that stopped short was interrupted by the user.
+                if let Ok(metrics) = result {
+                    // The final position is the baseline for spotting user scrolls.
+                    self.metrics = Some(metrics);
+                    let reachable = (metrics.extent_height - metrics.viewport_height).max(0.0);
+                    if (metrics.vertical_offset - target.clamp(0.0, reachable)).abs()
+                        > SCROLL_TOLERANCE
+                    {
+                        self.following = false;
+                    }
                 }
             }
             Message::Seek(timestamp) => {
                 if let Some(seek) = &input.seek {
                     seek.controller.seek_to(seek.key.clone(), timestamp);
                 }
+                self.follow();
+            }
+            Message::Follow => {
+                self.follow();
+                self.scroll_to_active(input, context);
             }
         }
     }
@@ -102,8 +155,10 @@ impl Component for SyncedLyrics {
                 .map(|(index, line)| render_lyric_line(index, active, line, input, context)),
         );
 
-        ScrollView::new()
+        let lyrics = ScrollView::new()
             .element_ref(&self.view)
+            // Without anchoring only scrolls move the offset, not line resizes.
+            .vertical_anchor_ratio(f64::NAN)
             .horizontal_scroll_bar_visibility(ScrollingScrollBarVisibility::Hidden)
             .vertical_scroll_bar_visibility(ScrollingScrollBarVisibility::Hidden)
             .content(
@@ -111,23 +166,58 @@ impl Component for SyncedLyrics {
                     .spacing(LYRIC_SPACING)
                     .horizontal_alignment(HorizontalAlignment::Stretch)
                     .children(items),
-            )
-            .into()
+            );
+
+        let mut layers: Vec<View> = vec![lyrics.into()];
+        if !self.following {
+            layers.push(
+                Button::new()
+                    .style(ButtonStyle::Accent)
+                    .horizontal_alignment(HorizontalAlignment::Center)
+                    .vertical_alignment(VerticalAlignment::Bottom)
+                    .margin(Thickness::new(0.0, 0.0, 0.0, 20.0))
+                    .on_click(context.message(Message::Follow))
+                    .content("Back to current line")
+                    .into(),
+            );
+        }
+        Grid::new().children(layers).into()
     }
 }
 
 impl SyncedLyrics {
-    fn scroll_to_active(&mut self, input: &SyncedLyricsInput) {
-        let Some(height) = self.viewport_height else {
+    fn follow(&mut self) {
+        self.following = true;
+        self.scrolled_to = None;
+    }
+
+    fn scroll_to_active(&mut self, input: &SyncedLyricsInput, context: &ComponentContext<Self>) {
+        let Some(metrics) = self.metrics else {
             return;
         };
+        if !self.following {
+            return;
+        }
         let active = active_line_index(&input.lines, input.position);
-        let target = lyric_scroll_target(&input.lines, active, input.viewport_width, height);
+        let target = lyric_scroll_target(
+            &input.lines,
+            active,
+            input.viewport_width,
+            metrics.viewport_height,
+        );
         if self.scrolled_to == Some(target) {
             return;
         }
-        if self.view.request_scroll_to(0.0, target, true, |_| {}) {
+
+        let id = self.next_scroll;
+        self.next_scroll += 1;
+        let done = context.callback(move |result| Message::Scrolled(id, target, result));
+        if self
+            .view
+            .request_scroll_to(0.0, target, true, move |result| done.call(result))
+        {
             self.scrolled_to = Some(target);
+            self.pending_scroll = Some(id);
         }
     }
 }

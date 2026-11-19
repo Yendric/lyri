@@ -49,6 +49,7 @@ pub(super) fn render_body(
             let view = component::<SyncedLyrics>(
                 "synced-lyrics",
                 SyncedLyricsInput {
+                    track: playback.key.clone(),
                     lines: lines.clone(),
                     position: playback.current_position(),
                     viewport_width: content_width.max(220.0),
