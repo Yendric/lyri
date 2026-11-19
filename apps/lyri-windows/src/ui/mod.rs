@@ -389,11 +389,11 @@ impl Lyri {
                     emit(SourceEvent::System(event))
                 }))
             }
-            SourceConfig::External { host, port } => {
-                PlaybackControls::External(spawn_external_source(host, port, move |event| {
+            SourceConfig::External { host, port } => PlaybackControls::External(
+                spawn_external_source(self.runtime.handle(), host, port, move |event| {
                     emit(SourceEvent::External(event))
-                }))
-            }
+                }),
+            ),
         };
 
         *self.controls.lock().expect("playback controls lock") = Some(next.clone());

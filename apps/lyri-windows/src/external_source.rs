@@ -2,6 +2,7 @@
 
 use std::time::Duration;
 
+use tokio::runtime::Handle;
 use tokio::sync::mpsc::{UnboundedSender, unbounded_channel};
 
 use lyri_core::lyrics::{LyricsStatus, TrackKey};
@@ -40,27 +41,25 @@ impl ExternalController {
     }
 }
 
-/// Follows the Lyri instance at `host:port`, reconnecting until shut down.
+/// Follows the Lyri instance at `host:port` on `runtime`, reconnecting
+/// until shut down.
 pub fn spawn_external_source(
+    runtime: &Handle,
     host: String,
     port: u16,
     emit: impl Fn(ExternalEvent) + Send + Sync + 'static,
 ) -> ExternalController {
     let (tx, rx) = unbounded_channel();
 
-    std::thread::spawn(move || {
-        let runtime = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .expect("valid external source runtime");
-
-        runtime.block_on(run_view_client(&host, port, rx, |event| match event {
+    runtime.spawn(async move {
+        run_view_client(&host, port, rx, |event| match event {
             ClientEvent::Connected => emit(ExternalEvent::ConnectionChanged(None)),
             ClientEvent::Disconnected(error) => {
                 emit(ExternalEvent::ConnectionChanged(Some(error)));
             }
             ClientEvent::State(state) => emit(mirrored_state(state)),
-        }));
+        })
+        .await;
     });
 
     ExternalController { tx }
