@@ -1,6 +1,9 @@
 use std::net::{IpAddr, SocketAddr};
+use std::rc::Rc;
 
 use windows_reactor::*;
+
+use super::{Lyri, Message};
 
 const DEFAULT_LRCLIB_URL: &str = "https://lrclib.net";
 
@@ -11,14 +14,14 @@ enum SongSource {
 }
 
 impl SongSource {
-    fn selected_index(self) -> i32 {
+    fn selected_index(self) -> usize {
         match self {
             Self::System => 0,
             Self::ExternalLyri => 1,
         }
     }
 
-    fn from_selected_index(index: i32) -> Self {
+    fn from_selected_index(index: usize) -> Self {
         match index {
             1 => Self::ExternalLyri,
             _ => Self::System,
@@ -78,6 +81,19 @@ impl Default for SettingsState {
     }
 }
 
+/// One edit made in the settings pane.
+#[derive(Clone, Debug)]
+pub enum SettingsChange {
+    SongSource(Option<usize>),
+    ExternalAddress(String),
+    ExternalPort(Option<f64>),
+    LrclibUrl(String),
+    WebServerEnabled(bool),
+    WebServerBindAddress(String),
+    WebServerPort(Option<f64>),
+    WebServerAllowSeek(bool),
+}
+
 impl SettingsState {
     pub(super) fn source(&self) -> SourceConfig {
         match self.song_source {
@@ -105,223 +121,222 @@ impl SettingsState {
             allow_seek: self.web_server_allow_seek,
         })
     }
-}
 
-/// A cleared NumberBox reports NaN; callers keep the previous port then.
-fn parse_port(value: f64) -> Option<u16> {
-    value
-        .is_finite()
-        .then(|| value.round().clamp(1.0, 65535.0) as u16)
-}
-
-/// Builds a change handler that clones the current settings, applies one
-/// field mutation, and publishes the result.
-fn update_settings<T: 'static>(
-    settings: &SettingsState,
-    set_settings: &SetState<SettingsState>,
-    apply: impl Fn(&mut SettingsState, T) + 'static,
-) -> impl Fn(T) + 'static {
-    let settings = settings.clone();
-    let set_settings = set_settings.clone();
-    move |value| {
-        let mut next = settings.clone();
-        apply(&mut next, value);
-        set_settings.call(next);
+    pub(super) fn apply(&mut self, change: SettingsChange) {
+        match change {
+            SettingsChange::SongSource(Some(index)) => {
+                self.song_source = SongSource::from_selected_index(index);
+            }
+            SettingsChange::SongSource(None) => {}
+            SettingsChange::ExternalAddress(value) => self.external_lyri_address = value,
+            SettingsChange::ExternalPort(value) => {
+                if let Some(port) = parse_port(value) {
+                    self.external_lyri_port = port;
+                }
+            }
+            SettingsChange::LrclibUrl(value) => self.lrclib_server_url = value,
+            SettingsChange::WebServerEnabled(value) => self.web_server_enabled = value,
+            SettingsChange::WebServerBindAddress(value) => self.web_server_bind_address = value,
+            SettingsChange::WebServerPort(value) => {
+                if let Some(port) = parse_port(value) {
+                    self.web_server_port = port;
+                }
+            }
+            SettingsChange::WebServerAllowSeek(value) => self.web_server_allow_seek = value,
+        }
     }
 }
 
+/// A cleared NumberBox reports no value; callers keep the previous port then.
+fn parse_port(value: Option<f64>) -> Option<u16> {
+    value
+        .filter(|value| value.is_finite())
+        .map(|value| value.round().clamp(1.0, 65535.0) as u16)
+}
+
+fn change<T: 'static>(context: &ViewContext<Lyri>, map: fn(T) -> SettingsChange) -> Callback<T> {
+    context.callback(move |value| Message::Settings(map(value)))
+}
+
+fn text_change(
+    context: &ViewContext<Lyri>,
+    map: fn(String) -> SettingsChange,
+) -> Callback<Rc<str>> {
+    context.callback(move |value: Rc<str>| Message::Settings(map(value.to_string())))
+}
+
 pub(super) fn render_settings_pane(
-    settings: SettingsState,
-    set_settings: SetState<SettingsState>,
+    settings: &SettingsState,
     is_dark: bool,
     web_server_error: Option<&str>,
-    close_settings: impl Fn() + 'static,
+    context: &ViewContext<Lyri>,
 ) -> Border {
-    let close_button = button("\u{E711}")
-        .on_click(close_settings)
-        .font_family("Segoe MDL2 Assets")
-        .font_size(12.0)
+    let close_button = Button::new()
+        .content(FontIcon::new().glyph("\u{E711}").font_size(12.0))
         .width(32.0)
         .height(30.0)
-        .padding(0.0)
+        .on_click(context.message(Message::CloseSettings))
         .tooltip("Close settings");
 
-    let header = grid((
-        text_block("Settings")
-            .font_size(20.0)
-            .semibold()
-            .vertical_alignment(VerticalAlignment::Center)
-            .grid_column(0),
-        close_button.grid_column(1),
-    ))
-    .columns([GridLength::Star(1.0), GridLength::Auto])
-    .column_spacing(12.0)
-    .horizontal_alignment(HorizontalAlignment::Stretch);
+    let header = Grid::new()
+        .columns([GridLength::STAR, GridLength::Auto])
+        .column_spacing(12.0)
+        .horizontal_alignment(HorizontalAlignment::Stretch)
+        .children((
+            TextBlock::new()
+                .text("Settings")
+                .font_size(20.0)
+                .font_weight(FontWeight::SEMI_BOLD)
+                .vertical_alignment(VerticalAlignment::Center)
+                .grid_column(0),
+            Border::new().grid_column(1).content(close_button),
+        ));
 
     let appearance = settings_section(
         "Appearance",
-        ToggleSwitch::new(is_dark)
+        ToggleSwitch::new()
             .header("Theme")
             .on_content("Dark")
             .off_content("Light")
-            .on_toggled(|dark| {
-                set_requested_theme(if dark {
-                    RequestedTheme::Dark
+            .is_on(is_dark)
+            .on_toggled(context.callback(|dark: bool| {
+                Message::SetTheme(if dark {
+                    WindowTheme::Dark
                 } else {
-                    RequestedTheme::Light
-                });
-            }),
+                    WindowTheme::Light
+                })
+            })),
     );
 
-    let source_picker = ComboBox::new(["System", "External Lyri"])
+    let source_picker = ComboBox::new()
         .header("Source")
+        .items_source(["System", "External Lyri"])
         .selected_index(settings.song_source.selected_index())
-        .on_selection_changed(update_settings(
-            &settings,
-            &set_settings,
-            |settings, index: i32| settings.song_source = SongSource::from_selected_index(index),
-        ));
+        .on_selection_changed(change(context, SettingsChange::SongSource));
 
-    let mut song_source_items = vec![Element::from(source_picker)];
+    let mut song_source_items: Vec<View> = vec![source_picker.into()];
     if settings.song_source == SongSource::ExternalLyri {
-        let external_address = text_box(settings.external_lyri_address.clone())
-            .header("IP address")
-            .placeholder_text("127.0.0.1")
-            .on_text_changed(update_settings(
-                &settings,
-                &set_settings,
-                |settings, value: String| settings.external_lyri_address = value,
-            ));
-
-        let external_port = NumberBox::new(f64::from(settings.external_lyri_port))
-            .header("Port")
-            .range(1.0, 65535.0)
-            .on_value_changed(update_settings(
-                &settings,
-                &set_settings,
-                |settings, value: f64| {
-                    if let Some(port) = parse_port(value) {
-                        settings.external_lyri_port = port;
-                    }
-                },
-            ));
-
-        song_source_items.push(Element::from(external_address));
-        song_source_items.push(Element::from(external_port));
+        song_source_items.push(
+            TextBox::new()
+                .header("IP address")
+                .placeholder_text("127.0.0.1")
+                .text(&settings.external_lyri_address)
+                .on_text_changed(text_change(context, SettingsChange::ExternalAddress))
+                .into(),
+        );
+        song_source_items.push(
+            port_box(settings.external_lyri_port, true)
+                .on_value_changed(change(context, SettingsChange::ExternalPort))
+                .into(),
+        );
     }
 
     let song_source = settings_section(
         "Song Source",
-        vstack(song_source_items)
+        StackPanel::new()
             .spacing(14.0)
-            .horizontal_alignment(HorizontalAlignment::Stretch),
+            .horizontal_alignment(HorizontalAlignment::Stretch)
+            .children(song_source_items),
     );
 
     let lrclib = settings_section(
         "LRCLIB",
-        text_box(settings.lrclib_server_url.clone())
+        TextBox::new()
             .header("Server URL")
             .placeholder_text(DEFAULT_LRCLIB_URL)
-            .on_text_changed(update_settings(
-                &settings,
-                &set_settings,
-                |settings, value: String| settings.lrclib_server_url = value,
-            )),
+            .text(&settings.lrclib_server_url)
+            .on_text_changed(text_change(context, SettingsChange::LrclibUrl)),
     );
 
     let web_enabled = settings.web_server_enabled;
-    let host_toggle = ToggleSwitch::new(web_enabled)
-        .header("Host local web view")
-        .on_content("On")
-        .off_content("Off")
-        .on_toggled(update_settings(
-            &settings,
-            &set_settings,
-            |settings, value: bool| settings.web_server_enabled = value,
-        ));
-
-    let bind_address = text_box(settings.web_server_bind_address.clone())
-        .header("Bind address")
-        .placeholder_text("0.0.0.0")
-        .enabled(web_enabled)
-        .on_text_changed(update_settings(
-            &settings,
-            &set_settings,
-            |settings, value: String| settings.web_server_bind_address = value,
-        ));
-
-    let port = NumberBox::new(f64::from(settings.web_server_port))
-        .header("Port")
-        .range(1.0, 65535.0)
-        .enabled(web_enabled)
-        .on_value_changed(update_settings(
-            &settings,
-            &set_settings,
-            |settings, value: f64| {
-                if let Some(port) = parse_port(value) {
-                    settings.web_server_port = port;
-                }
-            },
-        ));
-
-    let allow_seek = ToggleSwitch::new(settings.web_server_allow_seek)
-        .header("Allow viewers to seek")
-        .on_content("Allowed")
-        .off_content("View only")
-        .enabled(web_enabled)
-        .on_toggled(update_settings(
-            &settings,
-            &set_settings,
-            |settings, value: bool| settings.web_server_allow_seek = value,
-        ));
-
-    let mut web_server_items = vec![
-        Element::from(host_toggle),
-        Element::from(bind_address),
-        Element::from(port),
-        Element::from(allow_seek),
+    let mut web_server_items: Vec<View> = vec![
+        ToggleSwitch::new()
+            .header("Host local web view")
+            .on_content("On")
+            .off_content("Off")
+            .is_on(web_enabled)
+            .on_toggled(change(context, SettingsChange::WebServerEnabled))
+            .into(),
+        TextBox::new()
+            .header("Bind address")
+            .placeholder_text("0.0.0.0")
+            .text(&settings.web_server_bind_address)
+            .is_enabled(web_enabled)
+            .on_text_changed(text_change(context, SettingsChange::WebServerBindAddress))
+            .into(),
+        port_box(settings.web_server_port, web_enabled)
+            .on_value_changed(change(context, SettingsChange::WebServerPort))
+            .into(),
+        ToggleSwitch::new()
+            .header("Allow viewers to seek")
+            .on_content("Allowed")
+            .off_content("View only")
+            .is_on(settings.web_server_allow_seek)
+            .is_enabled(web_enabled)
+            .on_toggled(change(context, SettingsChange::WebServerAllowSeek))
+            .into(),
     ];
     if let Some(error) = web_server_error {
-        web_server_items.push(Element::from(
-            text_block(error).font_size(12.0).opacity(0.8).wrap(),
-        ));
+        web_server_items.push(
+            TextBlock::new()
+                .text(error)
+                .font_size(12.0)
+                .opacity(0.8)
+                .text_wrapping(TextWrapping::Wrap)
+                .into(),
+        );
     }
 
     let web_server = settings_section(
         "Web Server",
-        vstack(web_server_items)
+        StackPanel::new()
             .spacing(14.0)
-            .horizontal_alignment(HorizontalAlignment::Stretch),
+            .horizontal_alignment(HorizontalAlignment::Stretch)
+            .children(web_server_items),
     );
 
-    let content = scroll_view(
-        vstack((header, appearance, song_source, lrclib, web_server))
-            .spacing(22.0)
-            .horizontal_alignment(HorizontalAlignment::Stretch),
-    )
-    .vertical_scroll_bar_visibility(ScrollingScrollBarVisibility::Auto);
+    let content = ScrollView::new()
+        .vertical_scroll_bar_visibility(ScrollingScrollBarVisibility::Auto)
+        .content(
+            StackPanel::new()
+                .spacing(22.0)
+                .horizontal_alignment(HorizontalAlignment::Stretch)
+                .children((header, appearance, song_source, lrclib, web_server)),
+        );
 
-    border(content)
+    Border::new()
         .padding(22.0)
         .corner_radius(8.0)
-        .background(ThemeRef::SolidBackground)
-        .border_brush(ThemeRef::CardStroke)
-        .border_thickness(Thickness::uniform(1.0))
+        .background(ThemeBrush::SolidBackground)
+        .border_brush(ThemeBrush::CardStroke)
+        .border_thickness(1.0)
         .horizontal_alignment(HorizontalAlignment::Stretch)
         .vertical_alignment(VerticalAlignment::Stretch)
+        .content(content)
 }
 
-fn settings_section(title: &str, content: impl Into<Element>) -> Element {
-    vstack((
-        text_block(title).font_size(13.0).semibold().opacity(0.68),
-        border(content).padding(Thickness {
-            left: 0.0,
-            top: 2.0,
-            right: 0.0,
-            bottom: 0.0,
-        }),
-    ))
-    .spacing(10.0)
-    .horizontal_alignment(HorizontalAlignment::Stretch)
-    .into()
+fn port_box(port: u16, enabled: bool) -> NumberBox {
+    NumberBox::new()
+        .header("Port")
+        .minimum(1.0)
+        .maximum(65535.0)
+        .value(f64::from(port))
+        .is_enabled(enabled)
+}
+
+fn settings_section(title: &str, content: impl Into<View>) -> View {
+    StackPanel::new()
+        .spacing(10.0)
+        .horizontal_alignment(HorizontalAlignment::Stretch)
+        .children((
+            TextBlock::new()
+                .text(title)
+                .font_size(13.0)
+                .font_weight(FontWeight::SEMI_BOLD)
+                .opacity(0.68),
+            Border::new()
+                .padding(Thickness::new(0.0, 2.0, 0.0, 0.0))
+                .content(content),
+        ))
+        .into()
 }

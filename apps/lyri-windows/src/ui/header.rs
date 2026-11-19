@@ -14,26 +14,28 @@ pub(super) fn render_header(playback: Option<&NowPlaying>, status: &str) -> Stac
         .unwrap_or_else(|| status.to_string());
     let time_text = playback.map(format_playback_time).unwrap_or_default();
 
-    vstack((
-        text_block(title_text)
-            .font_size(22.0)
-            .semibold()
-            .wrap()
-            .text_alignment(TextAlignment::Center)
-            .horizontal_alignment(HorizontalAlignment::Center),
-        text_block(subtitle_text)
-            .font_size(13.0)
-            .opacity(0.68)
-            .wrap()
-            .text_alignment(TextAlignment::Center)
-            .horizontal_alignment(HorizontalAlignment::Center),
-        text_block(time_text)
-            .font_size(12.0)
-            .opacity(0.56)
-            .horizontal_alignment(HorizontalAlignment::Center),
-    ))
-    .spacing(4.0)
-    .horizontal_alignment(HorizontalAlignment::Stretch)
+    StackPanel::new()
+        .spacing(4.0)
+        .horizontal_alignment(HorizontalAlignment::Stretch)
+        .children((
+            centered_text(title_text)
+                .font_size(22.0)
+                .font_weight(FontWeight::SEMI_BOLD),
+            centered_text(subtitle_text).font_size(13.0).opacity(0.68),
+            TextBlock::new()
+                .text(time_text)
+                .font_size(12.0)
+                .opacity(0.56)
+                .horizontal_alignment(HorizontalAlignment::Center),
+        ))
+}
+
+fn centered_text(text: impl AsRef<str>) -> TextBlock {
+    TextBlock::new()
+        .text(text)
+        .text_wrapping(TextWrapping::Wrap)
+        .text_alignment(TextAlignment::Center)
+        .horizontal_alignment(HorizontalAlignment::Center)
 }
 
 fn format_playback_time(playback: &NowPlaying) -> String {

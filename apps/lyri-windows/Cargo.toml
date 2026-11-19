@@ -18,8 +18,7 @@ windows = { version = "0.62.2", features = [
     "Media_Control",
     "Win32_System_WinRT",
 ] }
-windows-reactor = { path = "../../windows-rs/crates/libs/reactor" }
+windows-reactor = { git = "https://github.com/microsoft/windows-rs", rev = "c1eb08964de0a563224abb1b148349d0742113c5" }
 
 [target.'cfg(windows)'.build-dependencies]
-windows-reactor-setup = { path = "../../windows-rs/crates/libs/reactor-setup" }
 winresource = "0.1"

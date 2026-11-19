@@ -7,10 +7,10 @@ use crate::external_source::PlaybackControls;
 use lyri_core::lyrics::{TimedLine, TrackKey, active_line_index, format_duration};
 
 #[derive(Clone, PartialEq)]
-pub(super) struct SyncedLyricsProps {
+pub(super) struct SyncedLyricsInput {
     pub(super) lines: Vec<TimedLine>,
     pub(super) position: Duration,
-    pub(super) viewport_height: f64,
+    /// Width the lines are laid out for; sizes the fonts.
     pub(super) viewport_width: f64,
     pub(super) seek: Option<LyricsSeekTarget>,
 }
@@ -30,105 +30,124 @@ impl PartialEq for LyricsSeekTarget {
 const LYRIC_SPACING: f64 = 16.0;
 const LYRIC_EDGE_PADDING: f64 = 240.0;
 const LYRIC_MIN_TEXT_WIDTH: f64 = 360.0;
+const LINE_FADE: Duration = Duration::from_millis(180);
 
-pub(super) fn synced_lyrics(props: &SyncedLyricsProps, cx: &mut RenderCx) -> Element {
-    if props.lines.is_empty() {
-        return empty_state("No timed lyric lines found.");
-    }
-
-    // None until the first line's timestamp: no line is highlighted yet.
-    let active = active_line_index(&props.lines, props.position);
-
-    let scroll_handle = cx.use_ref(Option::<ScrollViewHandle>::None);
-    let (scroll_ready, set_scroll_ready) = cx.use_state(false);
-    let active_index = cx.use_ref(active);
-    let line_count = props.lines.len();
-    let target_offset = lyric_scroll_target(
-        &props.lines,
-        active,
-        props.viewport_width,
-        props.viewport_height,
-    );
-    *active_index.borrow_mut() = active;
-
-    let handle_for_effect = scroll_handle.clone();
-    cx.use_effect(
-        (scroll_ready, active, line_count, target_offset),
-        move || {
-            if let Some(handle) = handle_for_effect.borrow().as_ref() {
-                let _ = handle.scroll_to_vertical_offset(target_offset);
-            }
-        },
-    );
-
-    let lyric_items = props
-        .lines
-        .iter()
-        .enumerate()
-        .map(|(index, line)| {
-            render_lyric_line(
-                index,
-                active,
-                line,
-                props.viewport_width,
-                props.seek.clone(),
-            )
-        })
-        .collect::<Vec<Element>>();
-
-    let mut items = Vec::with_capacity(lyric_items.len() + 1);
-    items.push(spacer(LYRIC_EDGE_PADDING));
-    items.extend(lyric_items);
-
-    let list_stack = vstack(items)
-        .spacing(LYRIC_SPACING)
-        .horizontal_alignment(HorizontalAlignment::Stretch);
-
-    let handle_for_ready = scroll_handle.clone();
-    let handle_for_resize = scroll_handle.clone();
-    let active_for_resize = active_index.clone();
-    let lines_for_resize = props.lines.clone();
-    scroll_view(list_stack)
-        .on_mounted(move |handle| {
-            *handle_for_ready.borrow_mut() = Some(handle);
-            set_scroll_ready.call(true);
-        })
-        .on_resize(move |width, height| {
-            let active = *active_for_resize.borrow();
-            let target_offset = lyric_scroll_target(&lines_for_resize, active, width, height);
-            if let Some(handle) = handle_for_resize.borrow().as_ref() {
-                let _ = handle.scroll_to_vertical_offset(target_offset);
-            }
-        })
-        .horizontal_scroll_bar_visibility(ScrollingScrollBarVisibility::Hidden)
-        .vertical_scroll_bar_visibility(ScrollingScrollBarVisibility::Hidden)
-        .height(props.viewport_height)
-        .horizontal_alignment(HorizontalAlignment::Stretch)
-        .vertical_alignment(VerticalAlignment::Stretch)
-        .into()
+#[derive(Clone)]
+pub(super) enum Message {
+    View(ScrollViewMetrics),
+    Seek(Duration),
 }
 
-fn spacer(height: f64) -> Element {
-    border(Element::Empty).height(height).into()
+/// Keeps the active lyric line centered in its scroll view.
+pub(super) struct SyncedLyrics {
+    view: ElementRef<ScrollView>,
+    _observation: ElementObservation,
+    /// Viewport height last reported by the scroll view, once it is bound.
+    viewport_height: Option<f64>,
+    scrolled_to: Option<f64>,
+}
+
+impl Component for SyncedLyrics {
+    type Input = SyncedLyricsInput;
+    type Message = Message;
+
+    fn create(_: &SyncedLyricsInput, context: &ComponentContext<Self>) -> Self {
+        let view = ElementRef::new();
+        let observed = context.callback(Message::View);
+        let observation = view.observe_view(move |metrics| observed.call(metrics));
+        Self {
+            view,
+            _observation: observation,
+            viewport_height: None,
+            scrolled_to: None,
+        }
+    }
+
+    fn input_changed(&mut self, input: &SyncedLyricsInput, _: &ComponentContext<Self>) {
+        self.scroll_to_active(input);
+    }
+
+    fn update(&mut self, message: Message, context: &ComponentContext<Self>) {
+        let input = context.input();
+        match message {
+            Message::View(metrics) => {
+                // Also reported for every scroll step; only a resize matters.
+                if self.viewport_height != Some(metrics.viewport_height) {
+                    self.viewport_height = Some(metrics.viewport_height);
+                    self.scroll_to_active(input);
+                }
+            }
+            Message::Seek(timestamp) => {
+                if let Some(seek) = &input.seek {
+                    seek.controller.seek_to(seek.key.clone(), timestamp);
+                }
+            }
+        }
+    }
+
+    fn view(&self, input: &SyncedLyricsInput, context: &mut ViewContext<Self>) -> View {
+        if input.lines.is_empty() {
+            return empty_state("No timed lyric lines found.");
+        }
+
+        // None until the first line's timestamp: no line is highlighted yet.
+        let active = active_line_index(&input.lines, input.position);
+        let mut items: Vec<View> = Vec::with_capacity(input.lines.len() + 1);
+        items.push(Border::new().height(LYRIC_EDGE_PADDING).into());
+        items.extend(
+            input
+                .lines
+                .iter()
+                .enumerate()
+                .map(|(index, line)| render_lyric_line(index, active, line, input, context)),
+        );
+
+        ScrollView::new()
+            .element_ref(&self.view)
+            .horizontal_scroll_bar_visibility(ScrollingScrollBarVisibility::Hidden)
+            .vertical_scroll_bar_visibility(ScrollingScrollBarVisibility::Hidden)
+            .content(
+                StackPanel::new()
+                    .spacing(LYRIC_SPACING)
+                    .horizontal_alignment(HorizontalAlignment::Stretch)
+                    .children(items),
+            )
+            .into()
+    }
+}
+
+impl SyncedLyrics {
+    fn scroll_to_active(&mut self, input: &SyncedLyricsInput) {
+        let Some(height) = self.viewport_height else {
+            return;
+        };
+        let active = active_line_index(&input.lines, input.position);
+        let target = lyric_scroll_target(&input.lines, active, input.viewport_width, height);
+        if self.scrolled_to == Some(target) {
+            return;
+        }
+        if self.view.request_scroll_to(0.0, target, true, |_| {}) {
+            self.scrolled_to = Some(target);
+        }
+    }
 }
 
 fn render_lyric_line(
     index: usize,
     active: Option<usize>,
     line: &TimedLine,
-    viewport_width: f64,
-    seek: Option<LyricsSeekTarget>,
-) -> Element {
+    input: &SyncedLyricsInput,
+    context: &ViewContext<SyncedLyrics>,
+) -> View {
+    let viewport_width = input.viewport_width;
     let is_active = active == Some(index);
     // Before the first line starts, fade lines by distance from the top so
     // the upcoming lyrics are visible without highlighting any of them.
     let distance = active.map_or(index + 1, |active| index.abs_diff(active));
-    let active_font = responsive_active_font(viewport_width);
-    let inactive_font = responsive_inactive_font(viewport_width);
     let font_size = if is_active {
-        active_font
+        responsive_active_font(viewport_width)
     } else {
-        inactive_font
+        responsive_inactive_font(viewport_width)
     };
     let text_width = responsive_lyric_text_width(viewport_width, font_size);
 
@@ -139,39 +158,37 @@ fn render_lyric_line(
         _ => 0.1,
     };
 
-    let mut line_container = border(
-        text_block(&line.text)
-            .font_size(font_size)
-            .font_weight(if is_active { 700 } else { 500 })
-            .wrap()
-            .text_alignment(TextAlignment::Center)
-            .max_width(text_width)
-            .horizontal_alignment(HorizontalAlignment::Center),
-    )
-    .min_height(responsive_min_line_height(viewport_width))
-    .padding(Thickness::xy(0.0, 2.0))
-    .opacity(opacity)
-    .horizontal_alignment(HorizontalAlignment::Stretch)
-    .with_opacity_transition(Duration::from_millis(180));
+    let line_container = Border::new()
+        .min_height(responsive_min_line_height(viewport_width))
+        .padding(Thickness::xy(0.0, 2.0))
+        .opacity(opacity)
+        .opacity_transition(LINE_FADE)
+        .horizontal_alignment(HorizontalAlignment::Stretch)
+        .content(
+            TextBlock::new()
+                .text(&line.text)
+                .font_size(font_size)
+                .font_weight(if is_active {
+                    FontWeight::BOLD
+                } else {
+                    FontWeight::MEDIUM
+                })
+                .text_wrapping(TextWrapping::Wrap)
+                .text_alignment(TextAlignment::Center)
+                .max_width(text_width)
+                .horizontal_alignment(HorizontalAlignment::Center),
+        );
 
-    if let Some(seek) = seek {
-        let key = seek.key;
-        let controller = seek.controller;
-        let timestamp = line.timestamp;
-        line_container = line_container
-            .background(Color {
-                a: 0,
-                r: 0,
-                g: 0,
-                b: 0,
-            })
-            .tooltip(format!("Jump to {}", format_duration(timestamp)))
-            .on_tapped(move || {
-                controller.seek_to(key.clone(), timestamp);
-            });
+    if input.seek.is_none() {
+        return line_container.into();
     }
 
-    line_container.into()
+    let timestamp = line.timestamp;
+    line_container
+        // A transparent background makes the whole row hit-testable.
+        .background(Color::transparent())
+        .on_pointer_released(context.callback(move |_: PointerEventInfo| Message::Seek(timestamp)))
+        .tooltip(format!("Jump to {}", format_duration(timestamp)))
 }
 
 fn lyric_scroll_target(
