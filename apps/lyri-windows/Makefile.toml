@@ -41,7 +41,6 @@ New-Item $env:PAYLOAD_DIR -ItemType Directory | Out-Null
 
 Copy-Item `
     "$env:TARGET_DIR\release\$env:APP_EXE", `
-    "$env:TARGET_DIR\release\Microsoft.WindowsAppRuntime.Bootstrap.dll", `
     "Package.appxmanifest" `
     $env:PAYLOAD_DIR
 Copy-Item Assets $env:PAYLOAD_DIR -Recurse
