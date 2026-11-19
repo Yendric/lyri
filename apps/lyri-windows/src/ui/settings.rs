@@ -64,6 +64,7 @@ pub(super) struct SettingsState {
     web_server_bind_address: String,
     web_server_port: u16,
     web_server_allow_seek: bool,
+    always_on_top: bool,
 }
 
 impl Default for SettingsState {
@@ -77,6 +78,7 @@ impl Default for SettingsState {
             web_server_bind_address: "0.0.0.0".to_string(),
             web_server_port: 8080,
             web_server_allow_seek: false,
+            always_on_top: false,
         }
     }
 }
@@ -92,6 +94,7 @@ pub enum SettingsChange {
     WebServerBindAddress(String),
     WebServerPort(Option<f64>),
     WebServerAllowSeek(bool),
+    AlwaysOnTop(bool),
 }
 
 impl SettingsState {
@@ -122,6 +125,10 @@ impl SettingsState {
         })
     }
 
+    pub(super) fn always_on_top(&self) -> bool {
+        self.always_on_top
+    }
+
     pub(super) fn apply(&mut self, change: SettingsChange) {
         match change {
             SettingsChange::SongSource(Some(index)) => {
@@ -143,6 +150,7 @@ impl SettingsState {
                 }
             }
             SettingsChange::WebServerAllowSeek(value) => self.web_server_allow_seek = value,
+            SettingsChange::AlwaysOnTop(value) => self.always_on_top = value,
         }
     }
 }
@@ -194,18 +202,29 @@ pub(super) fn render_settings_pane(
 
     let appearance = settings_section(
         "Appearance",
-        ToggleSwitch::new()
-            .header("Theme")
-            .on_content("Dark")
-            .off_content("Light")
-            .is_on(is_dark)
-            .on_toggled(context.callback(|dark: bool| {
-                Message::SetTheme(if dark {
-                    WindowTheme::Dark
-                } else {
-                    WindowTheme::Light
-                })
-            })),
+        StackPanel::new()
+            .spacing(14.0)
+            .horizontal_alignment(HorizontalAlignment::Stretch)
+            .children((
+                ToggleSwitch::new()
+                    .header("Theme")
+                    .on_content("Dark")
+                    .off_content("Light")
+                    .is_on(is_dark)
+                    .on_toggled(context.callback(|dark: bool| {
+                        Message::SetTheme(if dark {
+                            WindowTheme::Dark
+                        } else {
+                            WindowTheme::Light
+                        })
+                    })),
+                ToggleSwitch::new()
+                    .header("Always on top")
+                    .on_content("On")
+                    .off_content("Off")
+                    .is_on(settings.always_on_top)
+                    .on_toggled(change(context, SettingsChange::AlwaysOnTop)),
+            )),
     );
 
     let source_picker = ComboBox::new()

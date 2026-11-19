@@ -193,7 +193,8 @@ impl Component for Lyri {
         context.window_visuals(
             WindowVisuals::new()
                 .backdrop(WindowBackdrop::Mica)
-                .theme(self.theme),
+                .theme(self.theme)
+                .always_on_top(self.settings.always_on_top()),
         );
 
         let width = self.window_width;
