@@ -14,7 +14,7 @@
   <Identity
     Name="Yendric.Lyri-LiveLyrics"
     Publisher="CN=5C86FD69-543C-4D9C-9420-ED1BCE8949E8"
-    Version="1.0.3.0" />
+    Version="1.0.4.0" />
 
   <Properties>
     <DisplayName>Lyri - Live Lyrics</DisplayName>
