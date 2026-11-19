@@ -277,6 +277,7 @@ fn render_lyric_line(
     line_container
         // A transparent background makes the whole row hit-testable.
         .background(Color::transparent())
+        .pointer_cursor(InputSystemCursorShape::Hand)
         .on_pointer_released(context.callback(move |_: PointerEventInfo| Message::Seek(timestamp)))
         .tooltip(format!("Jump to {}", format_duration(timestamp)))
 }
